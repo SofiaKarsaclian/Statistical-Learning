@@ -1,0 +1,67 @@
+---
+title: "Final Project Task"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+
+Breast Cancer Classification
+Objective:
+
+Your task is to perform classification on breast cancer data (available on ILIAS) and evaluate the performance of at least one chosen classification models. The goal is to accurately classify breast cancer cases as either malignant or benign based on various features. You can read about the dataset here: https://www.kaggle.com/datasets/uciml/breast-cancer-wisconsin-data
+Dataset:
+
+You will be provided with a breast cancer dataset containing features such as tumor size, shape, texture, and more. The dataset is already split into features and labels (malignant or benign).
+Tasks:
+
+    Data Exploration:
+
+    Load the breast cancer dataset.
+    Explore the features and labels.
+    Check for missing values and handle them appropriately if necessary.
+    Visualize the distribution of classes and features.
+    Compute descriptive statistics for the dataset.
+
+    Data Preprocessing:
+
+    Split the dataset into training and testing sets.
+    Standardize or normalize the features if required.
+    Handle any categorical variables appropriately (if present).
+    Perform variable selection if required.
+
+    Model Selection and Model Evaluation:
+
+    Choose two classification approach that we have covered in class (e.g., Logistic Regression, Decision Trees, Random Forests, K-Nearest Neighbors, etc.).
+    Implement each algorithms and perform cross-validation on appropriate steps of your analysis
+    Evaluate the performance of each model on the testing set using appropriate evaluation metrics such as accuracy, precision, recall, F1-score, and ROC-AUC score.
+    Compare the performance of the models and identify the best-performing one.
+
+    Fine-Tuning:
+
+    If necessary, fine-tune the hyperparameters of the best-performing model using techniques like grid search or randomized search.
+
+    Final Model Selection:
+
+    Select the final classification model based on its performance metrics on the testing set.
+
+    Presentation and Report:
+
+    Prepare a detailed report documenting your approach, methodology, findings, and conclusions.
+    Include visualizations (e.g., confusion matrix, ROC curves) to support your analysis.
+    Present your findings in a clear and concise manner, highlighting the strengths and weaknesses of the classification models.
+
+Deliverables:
+
+    Quarto/Markdown file containing the code implementation.
+    Final report documenting the project’s methodology, results, and conclusions.
+    The report should not exceed 2 pages (excluding code and output).
+
+Important Notes:
+
+    Ensure proper documentation and commenting in your code for better understanding.
+    Aim for reproducibility by setting random seeds and documenting any external dependencies
