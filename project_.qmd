@@ -1,0 +1,107 @@
+---
+title: "Stat Learning Project"
+author: "Sophia, Elias, Andri"
+format: html
+editor: visual
+---
+
+## Statistical Learning Course Project
+
+Sophia
+
+Elias
+
+Andri Rutschmann (01/1246603)
+
+```{r Setup}
+#| label: setup
+#| message: false
+
+library(tidyverse)
+library(tidymodels)
+library(xgboost)
+library(doParallel)
+
+# Used to speed up XGBoost with parallel processing
+all_cores = detectCores(logical = TRUE)
+cl = makePSOCKcluster(all_cores)
+registerDoParallel(cl)
+```
+
+Okay... Let's go!
+
+```{r Preprocessing}
+data = read.csv('BreastCancer.csv') # load data (there is an NA col nameed X)
+sum(is.na(data$X)) # so col X is only NA lets remove it
+data = data %>% 
+  select(-X)
+any(is.na(data)) # there are no NA rows in the data set
+```
+
+```{r Exploration}
+barplot(table(data$diagnosis)) # simple bar plot showing beningn/malignant dist
+
+```
+
+```{r Gradient Boosting}
+# Creating train/test splits
+set.seed(1)
+training_split =initial_split(data, prop = 0.8, strata = diagnosis)
+
+train = training(training_split)
+test = testing(training_split) # test split for performance assession
+
+# Create tuning recipe
+tune_rec = recipe(diagnosis ~ ., data = train)
+
+# Specify k-fold CV (10-fold)
+folds = vfold_cv(train, v = 10)
+
+# XGBoost model specification
+xg_spec = boost_tree(trees = tune()) %>% 
+  set_engine("xgboost") %>% 
+  set_mode("classification")
+
+# XGBoost work flow
+xg_wf = workflow() %>% 
+  add_recipe(tune_rec) %>% 
+  add_model(xg_spec)
+
+# Lambda grid for model tuning
+tree_range = c(500, 1000) # set tree range
+tree_based_levels = c(trees = 2) # and levels (how many steps in tree range)
+
+lambda_grid = grid_regular(
+  trees(range = tree_range),
+  levels = tree_based_levels
+)
+
+# Start model training
+start = Sys.time() # Get some duration info
+print(Sys.time(), ': XG')
+
+xg_rs = tune_grid( # specify individual components with tune_grid
+  xg_wf, # workflow to be used
+  training_folds, # different folds
+  grid = lambda_grid, # lambda grid for tuning
+  control = control_resamples(save_pred = TRUE), # save all metrics (not just default)
+  metrics = metric_set(f_meas, precision, recall) # specify non-standard metrics
+)
+
+print(Sys.time() - start) # How long did the training take?
+
+collect_metrics(xg_rs, summarize = TRUE) # get model metrics
+print(select_by_pct_loss(xg_rs, metric = "f_meas", trees)) # print 'best' model F1
+
+# Use best model for finalization
+xg_wf_final = finalize_workflow(
+  xg_wf, select_by_pct_loss(xg_rs, metric = "f_meas", trees)
+  )
+
+# Get model performance on test split
+xg_fitted_final = last_fit(
+  xg_wf_final, training_split, metrics = metric_set(f_meas, precision, recall)
+  )
+
+saveRDS(xg_fitted_final, "model_xgboost.RDS")
+```
