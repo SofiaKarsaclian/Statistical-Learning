@@ -68,8 +68,8 @@ xg_wf = workflow() %>%
   add_model(xg_spec)
 
 # Lambda grid for model tuning
-tree_range = c(500, 1000) # set tree range
-tree_based_levels = c(trees = 2) # and levels (how many steps in tree range)
+tree_range = c(1, 3000) # set tree range
+tree_based_levels = c(trees = 3000) # and levels (how many steps in tree range)
 
 lambda_grid = grid_regular(
   trees(range = tree_range),
@@ -78,11 +78,11 @@ lambda_grid = grid_regular(
 
 # Start model training
 start = Sys.time() # Get some duration info
-print(Sys.time(), ': XG')
+paste('Start:', start)
 
 xg_rs = tune_grid( # specify individual components with tune_grid
   xg_wf, # workflow to be used
-  training_folds, # different folds
+  folds, # different folds
   grid = lambda_grid, # lambda grid for tuning
   control = control_resamples(save_pred = TRUE), # save all metrics (not just default)
   metrics = metric_set(f_meas, precision, recall) # specify non-standard metrics
@@ -91,7 +91,7 @@ xg_rs = tune_grid( # specify individual components with tune_grid
 print(Sys.time() - start) # How long did the training take?
 
 collect_metrics(xg_rs, summarize = TRUE) # get model metrics
-print(select_by_pct_loss(xg_rs, metric = "f_meas", trees)) # print 'best' model F1
+print(select_by_pct_loss(xg_rs, metric = "f_meas", trees)) # print 'best' AND simple model (according to F1) - select_best() gives best model (more complex)
 
 # Use best model for finalization
 xg_wf_final = finalize_workflow(
@@ -99,9 +99,14 @@ xg_wf_final = finalize_workflow(
   )
 
 # Get model performance on test split
-xg_fitted_final = last_fit(
+xg_final = last_fit(
   xg_wf_final, training_split, metrics = metric_set(f_meas, precision, recall)
   )
 
-saveRDS(xg_fitted_final, "model_xgboost.RDS")
+collect_metrics(xg_final)
+
+saveRDS(xg_final, "model_xgboost.RDS")
+
+collect_predictions(xg_final) %>% 
+  select(-.config)
 ```
