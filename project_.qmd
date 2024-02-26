@@ -7,9 +7,9 @@ editor: visual
 
 ## Statistical Learning Course Project
 
-Sophia
+Sophia Karsaclian ()
 
-Elias
+Elias Heppner ()
 
 Andri Rutschmann (01/1246603)
 
@@ -22,15 +22,14 @@ library(tidymodels)
 library(xgboost)
 library(doParallel)
 
+seed = 3 # because we're three pros working on this project!
+
 # Used to speed up XGBoost with parallel processing
 all_cores = detectCores(logical = TRUE)
 cl = makePSOCKcluster(all_cores)
 registerDoParallel(cl)
-```
 
-Okay... Let's go!
-
-```{r Preprocessing}
+# Preprocessing
 data = read.csv('BreastCancer.csv') # load data (there is an NA col nameed X)
 sum(is.na(data$X)) # so col X is only NA lets remove it
 data = data %>% 
@@ -38,23 +37,29 @@ data = data %>%
 any(is.na(data)) # there are no NA rows in the data set
 ```
 
+Okay... Let's go!
+
 ```{r Exploration}
 barplot(table(data$diagnosis)) # simple bar plot showing beningn/malignant dist
 
 ```
 
 ```{r Gradient Boosting}
+# For model evaluation it is easiest to set the positive (malignant) as fist level
+data$diagnosis = factor(data$diagnosis, levels = c('M', 'B'))
+
 # Creating train/test splits
-set.seed(1)
-training_split =initial_split(data, prop = 0.8, strata = diagnosis)
+set.seed(seed)
+training_split = initial_split(data, prop = 0.8, strata = diagnosis)
 
 train = training(training_split)
-test = testing(training_split) # test split for performance assession
+test = testing(training_split) # we don't really need this since we use last_fit()
 
 # Create tuning recipe
 tune_rec = recipe(diagnosis ~ ., data = train)
 
 # Specify k-fold CV (10-fold)
+set.seed(seed)
 folds = vfold_cv(train, v = 10)
 
 # XGBoost model specification
@@ -68,39 +73,40 @@ xg_wf = workflow() %>%
   add_model(xg_spec)
 
 # Lambda grid for model tuning
-tree_range = c(1, 3000) # set tree range
-tree_based_levels = c(trees = 3000) # and levels (how many steps in tree range)
-
 lambda_grid = grid_regular(
-  trees(range = tree_range),
-  levels = tree_based_levels
+  trees(range = c(1, 1000)), # set tree range
+  levels = c(trees = 1000) # and levels (how many steps in tree range)
 )
 
-# Start model training
+# Model training
+metrics = metric_set(f_meas, precision, recall, roc_auc) # specify metrics
+
 start = Sys.time() # Get some duration info
 paste('Start:', start)
 
+set.seed(seed)
 xg_rs = tune_grid( # specify individual components with tune_grid
   xg_wf, # workflow to be used
   folds, # different folds
   grid = lambda_grid, # lambda grid for tuning
   control = control_resamples(save_pred = TRUE), # save all metrics (not just default)
-  metrics = metric_set(f_meas, precision, recall) # specify non-standard metrics
+  metrics = metrics # specify metrics
 )
 
 print(Sys.time() - start) # How long did the training take?
 
 collect_metrics(xg_rs, summarize = TRUE) # get model metrics
-print(select_by_pct_loss(xg_rs, metric = "f_meas", trees)) # print 'best' AND simple model (according to F1) - select_best() gives best model (more complex)
+best_model = select_by_pct_loss(xg_rs, metric = "recall", trees) # 'best' simple model (according to metric) - select_best() gives best model (more complex)
+print(best_model)
 
 # Use best model for finalization
 xg_wf_final = finalize_workflow(
-  xg_wf, select_by_pct_loss(xg_rs, metric = "f_meas", trees)
+  xg_wf, best_model
   )
 
 # Get model performance on test split
 xg_final = last_fit(
-  xg_wf_final, training_split, metrics = metric_set(f_meas, precision, recall)
+  xg_wf_final, training_split, metrics = metrics
   )
 
 collect_metrics(xg_final)
