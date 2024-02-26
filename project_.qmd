@@ -1,17 +1,15 @@
 ---
 title: "Stat Learning Project"
-author: "Sophia, Elias, Andri"
+author: "Sofía, Elias, Andri"
 format: html
 editor: visual
 ---
 
 ## Statistical Learning Course Project
 
-Sophia Karsaclian ()
-
-Elias Heppner ()
-
-Andri Rutschmann (01/1246603)
+-   Sofía Karsaclian (01/1246546)
+-   Elias Heppner ()
+-   Andri Rutschmann (01/1246603)
 
 ```{r Setup}
 #| label: setup
@@ -21,6 +19,9 @@ library(tidyverse)
 library(tidymodels)
 library(xgboost)
 library(doParallel)
+library(caret)
+#install.packages('glmnet', dependencies=TRUE, type="binary")
+library(glmnet)
 
 seed = 3 # because we're three pros working on this project!
 
@@ -40,8 +41,19 @@ any(is.na(data)) # there are no NA rows in the data set
 Okay... Let's go!
 
 ```{r Exploration}
+prop.table(table(data$diagnosis))
 barplot(table(data$diagnosis)) # simple bar plot showing beningn/malignant dist
+```
 
+```{r}
+
+# Feature selection? Not really needed
+dim(data)
+
+df_corr <- cor(data %>% select(-id, -diagnosis))
+corrplot::corrplot(df_corr, order = "hclust", tl.cex = 1, addrect = 8)
+
+data2 <- data %>% select(-findCorrelation(df_corr, cutoff = 0.9))
 ```
 
 ```{r Gradient Boosting}
@@ -79,7 +91,7 @@ lambda_grid = grid_regular(
 )
 
 # Model training
-metrics = metric_set(f_meas, precision, recall, roc_auc) # specify metrics
+metrics = metric_set(f_meas, precision, recall) # specify metrics
 
 start = Sys.time() # Get some duration info
 paste('Start:', start)
@@ -115,4 +127,87 @@ saveRDS(xg_final, "model_xgboost.RDS")
 
 collect_predictions(xg_final) %>% 
   select(-.config)
+```
+
+```{r Lasso Regression}
+
+# specify model
+lasso_spec <- logistic_reg(penalty = 0.01, mixture = 1) %>%
+  set_mode("classification") %>%
+  set_engine("glmnet")
+
+# specify workflow
+lasso_wf <- workflow() %>%
+  add_recipe(tune_rec) %>%
+  add_model(lasso_spec)
+
+# 10 fold CV
+diag_folds <- vfold_cv(train)
+
+set.seed(3)
+lasso_rs <- fit_resamples(
+  lasso_wf,
+  diag_folds,
+  control = control_resamples(save_pred = TRUE)
+)
+
+# metrics from cv
+lasso_rs_metrics <- collect_metrics(lasso_rs)
+lasso_rs_predictions <- collect_predictions(lasso_rs)
+
+# roc curve - pretty neat
+lasso_rs_predictions %>%
+  group_by(id) %>%
+  roc_curve(truth = diagnosis, .pred_M) %>%
+  autoplot() 
+
+# Tuning for choosing best penalty - although pretty good already
+# model tuning
+tune_spec <- logistic_reg(penalty = tune(), mixture = 1) %>%
+  set_mode("classification") %>%
+  set_engine("glmnet")
+
+# create a regular grid of values to try
+# grid_refuls chooses sensible values to try for regularization penalty
+lambda_grid <- grid_regular(penalty(), levels = 30)
+lambda_grid
+
+# workflow for tuning
+tune_wf <- workflow() %>%
+  add_recipe(tune_rec) %>%
+  add_model(tune_spec)
+
+set.seed(3)
+tune_rs <- tune_grid(
+  tune_wf,
+  diag_folds,
+  grid = lambda_grid,
+  control = control_resamples(save_pred = TRUE)
+)
+
+autoplot(tune_rs)
+
+tune_rs %>%
+  show_best("roc_auc") # best ROC value is 99.37
+
+# penalty for best ROC is 0.042
+chosen_auc <- tune_rs %>%
+  select_by_one_std_err(metric = "roc_auc", -penalty)
+
+final_lasso <- finalize_workflow(tune_wf, chosen_auc)
+
+fitted_lasso <- fit(final_lasso, train)
+
+fitted_lasso %>%
+  extract_fit_parsnip() %>%
+  tidy() %>%
+  arrange(estimate)
+
+# Chosen terms: concave points(worst and mean), and worst measures for smoothness, symmetry, radius and texture. Worst measure for concave points its the most important predictor.
+
+
+# Evaluate on test data 
+lasso_final <- last_fit(final_lasso, split = training_split)
+collect_metrics(lasso_final)
+
 ```
