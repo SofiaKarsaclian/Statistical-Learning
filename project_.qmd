@@ -127,7 +127,7 @@ xg_final = last_fit(
 collect_metrics(xg_final)
 
 # Save... a bit unnecessary since training only takes a few seconds
-saveRDS(xg_final, "model_xgboost_feature_selected.RDS")
+# saveRDS(xg_final, "model_xgboost_feature_selected.RDS")
 
 collect_predictions(xg_final) %>% 
   select(-.config)
