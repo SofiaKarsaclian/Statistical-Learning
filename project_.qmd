@@ -24,6 +24,7 @@ library(caret)
 library(glmnet)
 
 seed = 3 # because we're three pros working on this project!
+target_metric = 'recall' # measure of model performance
 
 # Used to speed up XGBoost with parallel processing
 all_cores = detectCores(logical = TRUE)
@@ -54,11 +55,13 @@ df_corr <- cor(data %>% select(-id, -diagnosis))
 corrplot::corrplot(df_corr, order = "hclust", tl.cex = 1, addrect = 8)
 
 data2 <- data %>% select(-findCorrelation(df_corr, cutoff = 0.9))
+detach("package:caret", unload = TRUE)
 ```
 
 ```{r Gradient Boosting}
 # For model evaluation it is easiest to set the positive (malignant) as fist level
 data$diagnosis = factor(data$diagnosis, levels = c('M', 'B'))
+data = bind_cols(data %>% select(diagnosis), data2)
 
 # Creating train/test splits
 set.seed(seed)
@@ -91,7 +94,7 @@ lambda_grid = grid_regular(
 )
 
 # Model training
-metrics = metric_set(f_meas, precision, recall) # specify metrics
+metrics = metric_set(f_meas, precision, recall, roc_auc) # specify metrics
 
 start = Sys.time() # Get some duration info
 paste('Start:', start)
@@ -108,7 +111,7 @@ xg_rs = tune_grid( # specify individual components with tune_grid
 print(Sys.time() - start) # How long did the training take?
 
 collect_metrics(xg_rs, summarize = TRUE) # get model metrics
-best_model = select_by_pct_loss(xg_rs, metric = "recall", trees) # 'best' simple model (according to metric) - select_best() gives best model (more complex)
+best_model = select_by_pct_loss(xg_rs, metric = target_metric, trees) # 'best' simple model (according to metric) - select_best() gives best model (more complex)
 print(best_model)
 
 # Use best model for finalization
@@ -123,7 +126,8 @@ xg_final = last_fit(
 
 collect_metrics(xg_final)
 
-saveRDS(xg_final, "model_xgboost.RDS")
+# Save... a bit unnecessary since training only takes a few seconds
+saveRDS(xg_final, "model_xgboost_feature_selected.RDS")
 
 collect_predictions(xg_final) %>% 
   select(-.config)
@@ -142,9 +146,10 @@ lasso_wf <- workflow() %>%
   add_model(lasso_spec)
 
 # 10 fold CV
+set.seed(seed)
 diag_folds <- vfold_cv(train)
 
-set.seed(3)
+set.seed(seed)
 lasso_rs <- fit_resamples(
   lasso_wf,
   diag_folds,
@@ -177,22 +182,23 @@ tune_wf <- workflow() %>%
   add_recipe(tune_rec) %>%
   add_model(tune_spec)
 
-set.seed(3)
+set.seed(seed)
 tune_rs <- tune_grid(
   tune_wf,
   diag_folds,
   grid = lambda_grid,
-  control = control_resamples(save_pred = TRUE)
+  control = control_resamples(save_pred = TRUE),
+  metrics = metrics
 )
 
 autoplot(tune_rs)
 
 tune_rs %>%
-  show_best("roc_auc") # best ROC value is 99.37
+  show_best(target_metric) # best ROC value is 99.37
 
 # penalty for best ROC is 0.042
 chosen_auc <- tune_rs %>%
-  select_by_one_std_err(metric = "roc_auc", -penalty)
+  select_by_one_std_err(metric = target_metric, -penalty)
 
 final_lasso <- finalize_workflow(tune_wf, chosen_auc)
 
@@ -207,7 +213,7 @@ fitted_lasso %>%
 
 
 # Evaluate on test data 
-lasso_final <- last_fit(final_lasso, split = training_split)
-collect_metrics(lasso_final)
+lasso_final <- last_fit(final_lasso, split = training_split, metrics = metrics)
+collect_metrics(lasso_final, summarize = TRUE)
 
 ```
