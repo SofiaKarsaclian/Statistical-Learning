@@ -1,6 +1,6 @@
 ---
 title: "Stat Learning Project"
-author: "Sofía, Elias, Andri"
+author: "Sofía Karsaclian, Elias Heppner, Andri Rutschmann"
 format: html
 editor: visual
 ---
@@ -8,7 +8,7 @@ editor: visual
 ## Statistical Learning Course Project
 
 -   Sofía Karsaclian (01/1246546)
--   Elias Heppner ()
+-   Elias Heppner (01/1244414)
 -   Andri Rutschmann (01/1246603)
 
 ```{r Setup}
@@ -20,6 +20,7 @@ library(tidymodels)
 library(xgboost)
 library(doParallel)
 library(caret)
+library(psych)
 #install.packages('glmnet', dependencies=TRUE, type="binary")
 library(glmnet)
 
@@ -42,8 +43,104 @@ any(is.na(data)) # there are no NA rows in the data set
 Okay... Let's go!
 
 ```{r Exploration}
+
+describe(data)#get an overview 
+
 prop.table(table(data$diagnosis))
 barplot(table(data$diagnosis)) # simple bar plot showing beningn/malignant dist
+
+# Filter variables containing the word "mean"
+mean_vars <- names(data)[grep("mean", names(data))]
+
+# Plot histograms for variables containing the word "mean"
+par(mfrow = c(ceiling(length(mean_vars) / 2), 2))  # Set up multiple plots per page
+for (var in mean_vars) {
+  hist(data[[var]], main = var, xlab = var, breaks = 20)
+}
+#-> not normally distributed, all right-skewed
+
+se_vars <- names(data)[grep("se", names(data))]
+
+# Set up multiple scatterplots
+par(mfrow = c(ceiling(length(se_vars) / 2), 2))  # Set up multiple plots per page
+
+# Create scatterplots for variables containing the word "se" against the target variable
+for (var in se_vars) {
+  hist(data[[var]], main = var, xlab = var, breaks = 20)
+}
+
+
+```
+
+```{r Features Eli}
+
+alpha <- 0.05
+
+target <- data %>%
+                 mutate(diagnosis = ifelse(diagnosis == "M", 1, 0)) %>%
+                  select(diagnosis)
+target <- target$diagnosis
+
+#Check correlations between target variable and others in a comprehensible fashion
+association_list <- lapply(data[-c(1:2)], function(var) {
+  cor_val <- cor(var, target, method = "pearson")  # Point Biserial Correlation as numeric and binary variable
+  return(cor_val)
+})
+
+#Print results
+names(association_list) <- names(data)[-c(1:2)] 
+print(association_list)
+
+
+
+# Perform ANOVA for each variable against the target variable
+result_list <- lapply(data[-c(1:2)], function(var) {
+  aov_result <- aov(target ~ var, data = data)
+  p_value <- summary(aov_result)[[1]]$"Pr(>F)"[1]
+  significant <- ifelse(p_value < alpha, "Yes", "No")
+  return(data.frame(p_value = p_value, significant = significant))
+})
+
+# Print ANOVA results for each variable
+names(result_list) <- names(data)[-c(1:2)]  # Assign variable names to ANOVA results
+print(result_list)
+
+
+#Findings:
+
+#Correlation with Target Variable Below 0.5:
+# 
+# texture_mean
+#  0.4151853
+# smoothness_mean
+#  0.3585
+# symmetry_mean
+#  0.3304986
+# fractal_dimension_mean
+#  -0.0128376
+# texture_se
+#  -0.008303333
+# smoothness_se
+#  -0.06701601
+# concavity_se
+#  0.2537298
+# symmetry_se
+#  -0.006521756
+# fractal_dimension_se
+#  0.07797242
+# texture_worst
+#  0.4569028
+# smoothness_worst
+#  0.4214649
+# symmetry_worst
+#  0.4162943
+# fractal_dimension_worst
+#  0.3238722
+
+#Below 0.2 for fractal_dimension_mean, texture_se, smoothness_se, symmetry_se, fractal_dimension_se
+#-> That's also where the anova test yields insignificant results. Dropping these features likely will not decrease model performance.
+
+
 ```
 
 ```{r}
@@ -64,6 +161,7 @@ data$diagnosis = factor(data$diagnosis, levels = c('M', 'B'))
 
 # Creating train/test splits
 set.seed(seed)
+
 training_split = initial_split(data, prop = 0.6, strata = diagnosis)
 
 train = training(training_split)
@@ -215,5 +313,37 @@ fitted_lasso %>%
 # Evaluate on test data 
 lasso_final <- last_fit(final_lasso, split = training_split, metrics = metrics)
 collect_metrics(lasso_final, summarize = TRUE)
+
+```
+
+```{r SVM}
+
+library(e1071)
+
+svm_model <- svm(diagnosis ~ ., data = train, kernel = "radial")
+
+predictions <- predict(svm_model, newdata = test)
+library(caret)
+
+# Assuming 'predictions' are the predicted class labels and 'true_labels' are the true class labels
+confusion_matrix <- confusionMatrix(predictions, test$diagnosis)
+
+# Calculate precision
+precision <- confusion_matrix$byClass["Precision"]
+
+# Calculate recall (Sensitivity)
+recall <- confusion_matrix$byClass["Sensitivity"]
+
+# Calculate F1 score
+f1_score <- confusion_matrix$byClass["F1"]
+
+# Calculate AUC-ROC
+auc_roc <- confusion_matrix$byClass["ROC"]
+
+# Print or use the metrics as needed
+print(precision)
+print(recall)
+print(f1_score)
+print(auc_roc)
 
 ```
