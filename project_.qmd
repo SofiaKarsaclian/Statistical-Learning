@@ -21,8 +21,8 @@ library(xgboost)
 library(doParallel)
 library(caret)
 library(psych)
-#install.packages('glmnet', dependencies=TRUE, type="binary")
 library(glmnet)
+library(pROC)
 
 seed = 3 # because we're three pros working on this project!
 target_metric = 'roc_auc' # measure of model performance
@@ -35,9 +35,12 @@ registerDoParallel(cl)
 # Preprocessing
 data = read.csv('BreastCancer.csv') # load data (there is an NA col nameed X)
 sum(is.na(data$X)) # so col X is only NA lets remove it
+
 data = data %>% 
-  select(-X)
+  select(-X, -id) # take out id 
 any(is.na(data)) # there are no NA rows in the data set
+# 
+
 ```
 
 Okay... Let's go!
@@ -54,8 +57,8 @@ mean_vars <- names(data)[grep("mean", names(data))]
 
 # Plot histograms for variables containing the word "mean"
 par(mfrow = c(ceiling(length(mean_vars) / 2), 2))  # Set up multiple plots per page
-for (var in mean_vars) {
-  hist(data[[var]], main = var, xlab = var, breaks = 20)
+for (var in mean_vars){
+  hist(data[[var]], main = var, xlab = var, breaks = 20, mar = c(6,6,4,4))
 }
 #-> not normally distributed, all right-skewed
 
@@ -66,7 +69,7 @@ par(mfrow = c(ceiling(length(se_vars) / 2), 2))  # Set up multiple plots per pag
 
 # Create scatterplots for variables containing the word "se" against the target variable
 for (var in se_vars) {
-  hist(data[[var]], main = var, xlab = var, breaks = 20)
+  hist(data[[var]], main = var, xlab = var, breaks = 20, mar = c(4,4,2,2))
 }
 
 
@@ -285,11 +288,18 @@ lasso_rs <- fit_resamples(
 lasso_rs_metrics <- collect_metrics(lasso_rs)
 lasso_rs_predictions <- collect_predictions(lasso_rs)
 
+lasso_rs_metrics
 # roc curve - pretty neat
 lasso_rs_predictions %>%
   group_by(id) %>%
   roc_curve(truth = diagnosis, .pred_M) %>%
   autoplot() 
+
+```
+
+Through the penalty parameter in Lasso classification we can do feature selection. We initialized the lasso classificator with a penalty of 0.01 and fitted this initial model into a 10-fold cross-validation of the training data. Even with this initial model, the ROC-AUC plot shows that the performance is excellent (𝜇= 0.998). Recall, however, is slightly lower, and this is a very important metric in cancer detection, so we are going to try to improve it through hyperparameter tuning.
+
+```{r Tuning Lassos penalty parameter}
 
 # Tuning for choosing best penalty - although pretty good already
 # model tuning
@@ -298,7 +308,7 @@ tune_spec <- logistic_reg(penalty = tune(), mixture = 1) %>%
   set_engine("glmnet")
 
 # create a regular grid of values to try
-# grid_refuls chooses sensible values to try for regularization penalty
+# grid_regular chooses sensible values to try for regularization penalty
 lambda_grid <- grid_regular(penalty(), levels = 100)
 # lambda_grid
 
@@ -316,18 +326,22 @@ tune_rs <- tune_grid(
   metrics = metrics
 )
 
-autoplot(tune_rs)
+autoplot(tune_rs) 
 
 tune_rs %>% # show the best models and their respective penalties
-  show_best(target_metric) # best ROC value is 99.37
+  show_best(target_metric) 
 
-# penalty for best ROC is 0.042
-chosen_auc <- tune_rs %>%
+chosen_l1 <- tune_rs %>%
   select_best(metric = target_metric)
 
-print(chosen_auc)
+print(chosen_l1)
 
-final_lasso <- finalize_workflow(tune_wf, chosen_auc)
+```
+
+We tune the model's $l_1$ penalty by creating a grid of 100 sensible values to try with `grid_regular`. We learn that the value of $l_1$ that yields the best recall (𝜇= 0.993) is 0.00059, and that this value also yields high roc_auc.
+
+```{r}
+final_lasso <- finalize_workflow(tune_wf, chosen_l1)
 
 fitted_lasso <- fit(final_lasso, train)
 
@@ -336,14 +350,20 @@ fitted_lasso <- fit(final_lasso, train)
 #   tidy() %>%
 #   arrange(estimate)
 
-# Chosen terms: concave points(worst and mean), and worst measures for smoothness, symmetry, radius and texture. Worst measure for concave points its the most important predictor.
-
-
 # Evaluate on test data 
 lasso_final <- last_fit(final_lasso, split = training_split, metrics = metrics)
 collect_metrics(lasso_final, summarize = TRUE)
 
+
+# Plot ROC curve
+predictions <- lasso_final %>%
+  collect_predictions()
+
+roc_data <- roc(predictions$diagnosis, predictions$.pred_M)
+plot(roc_data, main = "ROC Curve", col = "blue", lwd = 2)
 ```
+
+Finally, we fit the Lasso with the tuned penalty to the train data, and evaluate the performance on the test data. The model performs really well, with a high capability of distinguishing classes (ROC AUC = 98.12%), and a high recall (95.29%) which means that the model is effective at capturing most positive cases, minimizing false negatives.
 
 ```{r SVM}
 
@@ -374,5 +394,4 @@ print(precision)
 print(recall)
 print(f1_score)
 print(auc_roc)
-
 ```
