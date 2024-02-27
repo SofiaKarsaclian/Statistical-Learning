@@ -316,7 +316,7 @@ lasso_rs_predictions %>%
   autoplot() 
 ```
 
-Through the penalty parameter in Lasso classification we can do feature selection. We initialized the lasso classificator with a penalty of 0.01 and fitted this initial model into a 10-fold cross-validation of the training data. Even with this initial model, the ROC-AUC plot shows that the performance is excellent (𝜇= 0.998). Recall, however, is slightly lower, and this is a very important metric in cancer detection, so we are going to try to improve it through hyperparameter tuning.
+Through the penalty parameter in Lasso classification we can do feature selection. We initialized the lasso classificator with a penalty of 0.01 and fitted this initial model into a 10-fold cross-validation of the training data. Even with this initial model, the ROC-AUC plot shows that the performance is excellent (𝜇= 0.993). Recall, however, is slightly lower, and this is a very important metric in cancer detection, so we are going to try to improve it through hyperparameter tuning.
 
 ```{r Tuning Lassos penalty parameter}
 # Tuning for choosing best penalty - although pretty good already
@@ -355,22 +355,23 @@ chosen_l1 <- tune_rs %>%
 print(chosen_l1)
 ```
 
-We tune the model's $l_1$ penalty by creating a grid of 100 sensible values to try with `grid_regular`. We learn that the value of $l_1$ that yields the best recall (𝜇= 0.993) is 0.00059, and that this value also yields high roc_auc.
+We tune the model's $l_1$ penalty by creating a grid of 100 sensible values to try with `grid_regular`. We learn that the value of $l_1$ that yields the best recall (𝜇= 0.96) is 0.0024, and that this value also yields high roc_auc.
 
 ```{r}
 final_lasso <- finalize_workflow(tune_wf, chosen_l1)
 
 fitted_lasso <- fit(final_lasso, train)
 
-# fitted_lasso %>%
-#   extract_fit_parsnip() %>%
-#   tidy() %>%
-#   arrange(estimate)
+fitted_lasso %>%
+  extract_fit_parsnip() %>%
+  tidy() %>%
+  filter(estimate != 0) %>%
+  arrange(estimate)
 
 # Evaluate on test data 
 lasso_final <- last_fit(final_lasso, split = training_split, metrics = metrics)
 collect_metrics(lasso_final, summarize = TRUE)
-
+collect_predictions(lasso_final)
 
 # Plot ROC curve
 predictions <- lasso_final %>%
@@ -380,7 +381,13 @@ roc_data <- roc(predictions$diagnosis, predictions$.pred_M)
 plot(roc_data, main = "ROC Curve", col = "blue", lwd = 2)
 ```
 
-Finally, we fit the Lasso with the tuned penalty to the train data, and evaluate the performance on the test data. The model performs really well, with a high capability of distinguishing classes (ROC AUC = 98.12%), and a high recall (95.29%) which means that the model is effective at capturing most positive cases, minimizing false negatives.
+Finally, we fit the Lasso with the tuned penalty to the train data, and evaluate the performance on the test data. The model performs really well, with a high capability of distinguishing classes (ROC AUC = 99.39%), and a high recall (96.68%) which means that the model is effective at capturing most positive cases, minimizing false negatives.
+
+With a penalty parameter set at 0.0024, the majority of coefficients were effectively regularized to zero, resulting in the selection of 14 features considered most important for the classification.
+
+Among these, the variable that contributes the most to classify the breast mass as malign is the compactness SE: the more changes or variations in the mass' compactness, the more likely for it to be classified as malign. In a lesser extent, mean fractal dimension also contributes for a malign classification.
+
+On the other hand, higher values of smoothness, concavity and symmetry are associated with a more likely benign classification. These features seem to be characteristics observed in non-cancerous masses.
 
 ```{r SVM}
 library(e1071)
