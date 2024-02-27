@@ -1,7 +1,9 @@
 ---
 title: "Stat Learning Project"
 author: "Sofía Karsaclian, Elias Heppner, Andri Rutschmann"
-format: html
+format:
+  html:
+    embed-resources: true
 editor: visual
 ---
 
@@ -14,6 +16,7 @@ editor: visual
 ```{r Setup}
 #| label: setup
 #| message: false
+#| echo: false
 
 library(tidyverse)
 library(tidymodels)
@@ -44,6 +47,9 @@ any(is.na(data)) # there are no NA rows in the data set
 Okay... Let's go!
 
 ```{r Exploration}
+#| eval: false
+#| echo: false
+
 describe(data)#get an overview 
 
 prop.table(table(data$diagnosis))
@@ -53,7 +59,7 @@ barplot(table(data$diagnosis)) # simple bar plot showing beningn/malignant dist
 mean_vars <- names(data)[grep("mean", names(data))]
 
 # Plot histograms for variables containing the word "mean"
-par(mfrow = c(ceiling(length(mean_vars) / 2), 2))  # Set up multiple plots per page
+# par(mfrow = c(ceiling(length(mean_vars) / 2), 2))  # Set up multiple plots per page
 for (var in mean_vars){
   hist(data[[var]], main = var, xlab = var, breaks = 20, mar = c(6,6,4,4))
 }
@@ -62,7 +68,7 @@ for (var in mean_vars){
 se_vars <- names(data)[grep("se", names(data))]
 
 # Set up multiple scatterplots
-par(mfrow = c(ceiling(length(se_vars) / 2), 2))  # Set up multiple plots per page
+# par(mfrow = c(ceiling(length(se_vars) / 2), 2))  # Set up multiple plots per page
 
 # Create scatterplots for variables containing the word "se" against the target variable
 for (var in se_vars) {
@@ -71,6 +77,9 @@ for (var in se_vars) {
 ```
 
 ```{r Features Eli}
+#| warnings: false
+#| echo: false
+
 alpha <- 0.05
 
 target <- data %>%
@@ -139,6 +148,8 @@ print(result_list)
 ```
 
 ```{r Feature Selection}
+#| echo: false
+
 # Feature selection? Not really needed
 dim(data)
 
@@ -151,28 +162,36 @@ detach("package:caret", unload = TRUE) # causes problems with metrics
 
 # Model Comparison
 
-We are going to compare two different models for this project: eXtreme Gradient Boosting and Lasso Regression.
-
-Due to this choice we do not need to perform feature selection. XGBoost being a decision tree based model does no
-
-## eXtreme Gradient Boosting (XGBoost)
-
-The first model we want to investigate is the 'Kaggle-famous' XGBoost model. Known for its impressive performance on many Kaggle challenges.
-
-```{r Gradient Boosting}
-#| warnings: false
-
+```{r Train Test Setup}
 # For model evaluation it is easiest to set the positive (malignant) as fist level
 data$diagnosis = factor(data$diagnosis, levels = c('M', 'B'))
 data2 = data %>% 
   select(-fractal_dimension_mean, -texture_se, -smoothness_se, -symmetry_se, -fractal_dimension_se)
 
 # Creating train/test splits
+train_test = 0.6 # define how much of the data is used as training/test data
 set.seed(seed)
-training_split = initial_split(data, prop = 0.8, strata = diagnosis)
+training_split = initial_split(data, prop = train_test, strata = diagnosis)
 
 train = training(training_split)
 test = testing(training_split) # we don't really need this since we use last_fit()
+```
+
+We are going to compare two different models for this project: eXtreme Gradient Boosting and Lasso Regression. Due to this choice we do not need to perform normalization and feature selection ourselves.<br>
+XGBoost being a decision tree based model does not require normalization and due to our use of the glmnet library normalization is performed automatically when we fit our lasso regression.<br>
+Regarding feature selection we exploit the fact that XGBoost as well as lasso inherently perform feature selection. XGBoost does so due to the fact that the maximum tree depth is limited to a specific $n$ and the algorithm therefore only splits on the $n$ most informative splitting criteria. Lasso uses a penalty to restrict the number of features that influence the model thereby reducing dimensionality.<br>
+
+Using Emil Hvitfeldt's and Julia Silge's 'Supervised Machine Learning for Text Analysis in R' we fit both models using the tidymodels R package.
+
+## eXtreme Gradient Boosting (XGBoost)
+
+The first model we want to investigate is the 'Kaggle-famous' XGBoost model. Known for its impressive performance on many Kaggle challenges.
+We started off by fitting a model using the xgboost default values for all hyperparameters except the number of trees which we tuned (model 1). This model already performs quite well. We then also tuned the maximum tree depth, which usually defaults to $6$ (model 2), which yielded an increase in performance. Finally, we went ahead and tuned all tunable hyperparameters (model 3) to achieve the best performance.<br>
+Interestingly enough, model 3 didn't outperform model 1 and 2 when we used an 80/20 distribution for our training/test split. Using a 60/40 training/test split, though, model 3 achieved a recall of $0.96$ instead of model 1 and 2's respective $0.92$.<br>
+
+```{r Gradient Boosting Training - 1}
+#| warnings: false
+#| echo: false
 
 # Create tuning recipe
 tune_rec = recipe(diagnosis ~ ., data = train)
@@ -181,23 +200,33 @@ tune_rec = recipe(diagnosis ~ ., data = train)
 set.seed(seed)
 folds = vfold_cv(train, v = 10)
 
+model_nr = 1
+
 # XGBoost model specification
-# xg_spec = boost_tree(trees = tune()) %>%
-#   set_engine("xgboost") %>%
-#   set_mode("classification")
-
-xg_spec = boost_tree(trees = tune(),
-                     tree_depth = tune()) %>%
-  set_engine("xgboost") %>%
-  set_mode("classification")
-
-# xg_spec = boost_tree(trees = tune(),
-#                      min_n = tune(),
-#                      tree_depth = tune(),
-#                      learn_rate = tune(),
-#                      loss_reduction = tune()) %>%
-#   set_engine("xgboost") %>%
-#   set_mode("classification")
+if(model_nr == 1){ # model with less tuned parameters
+  xg_spec = boost_tree(trees = tune()) %>%
+    set_engine("xgboost") %>%
+    set_mode("classification")
+  
+  model_name = "xg_trees"
+}else if(model_nr == 2){ # model with more tuned parameters (optimal)
+  xg_spec = boost_tree(trees = tune(),
+                      tree_depth = tune()) %>%
+    set_engine("xgboost") %>%
+    set_mode("classification")
+  
+  model_name = "xg_trees_depth"
+}else{ # model with even more tuned parameters
+  xg_spec = boost_tree(trees = tune(),
+                       min_n = tune(),
+                       tree_depth = tune(),
+                       learn_rate = tune(),
+                       loss_reduction = tune()) %>%
+    set_engine("xgboost") %>%
+    set_mode("classification")
+  
+  model_name = "xg_trees_depth_n_rate_reduction"
+}
 
 # XGBoost work flow
 xg_wf = workflow() %>% 
@@ -205,30 +234,32 @@ xg_wf = workflow() %>%
   add_model(xg_spec)
 
 # Lambda grid for model tuning
-# lambda_grid = grid_regular(
-#   trees(range = c(1, 100)),
-#   levels = c(trees = 100)
-# )
-
-lambda_grid = grid_regular(
-  trees(range = c(1, 60)),
-  tree_depth(range = c(1, 30)),
-  levels = c(trees = 10,
-             tree_depth  = 10)
-)
-
-# lambda_grid = grid_regular(
-#   trees(range = c(1, 60)),
-#   min_n(range = c(1, 10)),
-#   tree_depth(range = c(1, 30)),
-#   learn_rate(range = c(0, 1)),
-#   loss_reduction(range = c(0, 1)),
-#   levels = c(trees = 10,
-#              min_n = 10,
-#              tree_depth  = 10,
-#              learn_rate = 10,
-#              loss_reduction = 10)
-# )
+if(model_nr == 1){ # grid for model with less tuned parameters
+  lambda_grid = grid_regular(
+    trees(range = c(1, 50)),
+    levels = c(trees = 50)
+  )
+}else if(model_nr == 2){ # grid for model with more tuned parameters (optimal)
+  lambda_grid = grid_regular(
+    trees(range = c(1, 50)),
+    tree_depth(range = c(1, 10)),
+    levels = c(trees = 50,
+               tree_depth  = 10)
+  )
+}else{ # grid for model with even more tuned parameters
+  lambda_grid = grid_regular(
+    trees(range = c(30, 50)),
+    min_n(range = c(1, 50)),
+    tree_depth(range = c(1, 10)),
+    learn_rate(range = c(0, 1)),
+    loss_reduction(range = c(0, 1)),
+    levels = c(trees = 20,
+               min_n = 5,
+               tree_depth  = 10,
+               learn_rate = 5,
+               loss_reduction = 5)
+  )
+}
 
 # Model training
 metrics = metric_set(f_meas, precision, recall, roc_auc) # specify metrics
@@ -242,10 +273,12 @@ xg_rs = tune_grid( # specify individual components with tune_grid
   metrics = metrics # specify metrics
 )
 
-# autoplot(xg_rs)
-
 xg_rs %>% 
   show_best(target_metric)
+```
+
+```{r Gradient Boosting Training - 2}
+#| echo: false
 
 # collect_metrics(xg_rs, summarize = TRUE) # get model metrics
 best_model = select_best(xg_rs, metric = target_metric) # select best model according to target metric
@@ -261,27 +294,38 @@ xg_final = last_fit(
   xg_wf_final, training_split, metrics = metrics
   )
 
+# Save - only really necessary for the model with the most tuned parameters
+if(train_test == 0.8){
+  folder = '80_20'
+}else{
+  folder = '60_40'
+}
+saveRDS(xg_final, paste0(folder, '/', model_name, ".RDS")) # takes several mins to re-fit model
+
 collect_metrics(xg_final)
-
-# Save... a bit unnecessary since training only takes a few seconds
-# saveRDS(xg_final, "xg_trees_depth_n_rate_reduction.RDS")
-
-# collect_predictions(xg_final) %>% 
-#   select(id, .row, diagnosis, .pred_class)
 ```
 
 ```{r Load XGBoost Model(s)}
-xg_final_1 = readRDS("xg_trees.RDS")
-xg_final_2 = readRDS("xg_trees_depth.RDS")
-xg_final_3 = readRDS("xg_trees_depth_n_rate_reduction.RDS")
+#| echo: false
 
-collect_metrics(xg_final_1)
-collect_metrics(xg_final_2)
-collect_metrics(xg_final_3)
+xg_trees = readRDS(paste0(folder, '/', "xg_trees.RDS"))
+xg_trees_depth = readRDS(paste0(folder, '/', "xg_trees_depth.RDS"))
+xg_trees_depth_n_rate_reduction = readRDS(paste0(folder, '/', "xg_trees_depth_n_rate_reduction.RDS"))
 ```
 
+```{r Print XGBoost Comparison}
+#| echo: true
+
+collect_metrics(xg_trees)
+collect_metrics(xg_trees_depth)
+collect_metrics(xg_trees_depth_n_rate_reduction)
+```
+
+We see that the 'simplest' model performs best. It seems that tuning only the number of decision trees used in the XGBoost fitting hit some sort of sweet spot. Tuning for tree depth as well seems to ...
 
 ```{r Lasso Regression}
+#| echo: false
+
 # specify model
 lasso_spec <- logistic_reg(penalty = 0.01, mixture = 1) %>%
   set_mode("classification") %>%
@@ -318,7 +362,9 @@ lasso_rs_predictions %>%
 
 Through the penalty parameter in Lasso classification we can do feature selection. We initialized the lasso classificator with a penalty of 0.01 and fitted this initial model into a 10-fold cross-validation of the training data. Even with this initial model, the ROC-AUC plot shows that the performance is excellent (𝜇= 0.993). Recall, however, is slightly lower, and this is a very important metric in cancer detection, so we are going to try to improve it through hyperparameter tuning.
 
-```{r Tuning Lassos penalty parameter}
+```{r Tuning Lassos Penalty Parameter}
+#| echo: false
+
 # Tuning for choosing best penalty - although pretty good already
 # model tuning
 tune_spec <- logistic_reg(penalty = tune(), mixture = 1) %>%
@@ -357,7 +403,9 @@ print(chosen_l1)
 
 We tune the model's $l_1$ penalty by creating a grid of 100 sensible values to try with `grid_regular`. We learn that the value of $l_1$ that yields the best recall (𝜇= 0.96) is 0.0024, and that this value also yields high roc_auc.
 
-```{r}
+```{r Lasso Performance}
+#| echo: false
+
 final_lasso <- finalize_workflow(tune_wf, chosen_l1)
 
 fitted_lasso <- fit(final_lasso, train)
@@ -390,31 +438,33 @@ Among these, the variable that contributes the most to classify the breast mass 
 On the other hand, higher values of smoothness, concavity and symmetry are associated with a more likely benign classification. These features seem to be characteristics observed in non-cancerous masses.
 
 ```{r SVM}
-library(e1071)
+#| echo: false
 
-svm_model <- svm(diagnosis ~ ., data = train, kernel = "radial")
-
-predictions <- predict(svm_model, newdata = test)
-library(caret)
-
-# Assuming 'predictions' are the predicted class labels and 'true_labels' are the true class labels
-confusion_matrix <- confusionMatrix(predictions, test$diagnosis)
-
-# Calculate precision
-precision <- confusion_matrix$byClass["Precision"]
-
-# Calculate recall (Sensitivity)
-recall <- confusion_matrix$byClass["Sensitivity"]
-
-# Calculate F1 score
-f1_score <- confusion_matrix$byClass["F1"]
-
-# Calculate AUC-ROC
-auc_roc <- confusion_matrix$byClass["ROC"]
-
-# Print or use the metrics as needed
-print(precision)
-print(recall)
-print(f1_score)
-print(auc_roc)
+# library(e1071)
+# 
+# svm_model <- svm(diagnosis ~ ., data = train, kernel = "radial")
+# 
+# predictions <- predict(svm_model, newdata = test)
+# library(caret)
+# 
+# # Assuming 'predictions' are the predicted class labels and 'true_labels' are the true class labels
+# confusion_matrix <- confusionMatrix(predictions, test$diagnosis)
+# 
+# # Calculate precision
+# precision <- confusion_matrix$byClass["Precision"]
+# 
+# # Calculate recall (Sensitivity)
+# recall <- confusion_matrix$byClass["Sensitivity"]
+# 
+# # Calculate F1 score
+# f1_score <- confusion_matrix$byClass["F1"]
+# 
+# # Calculate AUC-ROC
+# auc_roc <- confusion_matrix$byClass["ROC"]
+# 
+# # Print or use the metrics as needed
+# print(precision)
+# print(recall)
+# print(f1_score)
+# print(auc_roc)
 ```
