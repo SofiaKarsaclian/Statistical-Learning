@@ -7,7 +7,7 @@ format:
 editor: visual
 ---
 
-## Statistical Learning Course Project
+## Statistical Learning: Final Project
 
 -   Sofía Karsaclian (01/1246546)
 -   Elias Heppner (01/1244414)
@@ -26,6 +26,7 @@ library(caret)
 library(psych)
 library(glmnet)
 library(pROC)
+library(knitr)
 
 seed = 3 # because we're three pros working on this project!
 target_metric = 'recall' # measure of model performance
@@ -44,27 +45,35 @@ data = data %>%
 any(is.na(data)) # there are no NA rows in the data set
 ```
 
-Okay... Let's go!
+# Data Exploration and Feature Selection
+
+## Exploration
 
 ```{r Exploration}
 #| eval: false
 #| echo: false
+
+#| label: setup
+#| message: false
 
 describe(data)#get an overview 
 
 prop.table(table(data$diagnosis))
 barplot(table(data$diagnosis)) # simple bar plot showing beningn/malignant dist
 
-# Filter variables containing the word "mean"
+#Plot means in histogram
 mean_vars <- names(data)[grep("mean", names(data))]
 
 # Plot histograms for variables containing the word "mean"
 # par(mfrow = c(ceiling(length(mean_vars) / 2), 2))  # Set up multiple plots per page
-for (var in mean_vars){
-  hist(data[[var]], main = var, xlab = var, breaks = 20, mar = c(6,6,4,4))
+for (var in mean_vars) {
+  hist(data[[var]], main = var, xlab = var, breaks = 20)
+  mean_val <- mean(data[[var]])
+  abline(v = mean_val, col = "red", lwd = 2)
 }
 #-> not normally distributed, all right-skewed
 
+#Plot standard errors
 se_vars <- names(data)[grep("se", names(data))]
 
 # Set up multiple scatterplots
@@ -72,45 +81,94 @@ se_vars <- names(data)[grep("se", names(data))]
 
 # Create scatterplots for variables containing the word "se" against the target variable
 for (var in se_vars) {
-  hist(data[[var]], main = var, xlab = var, breaks = 20, mar = c(4,4,2,2))
+  hist(data[[var]], main = var, xlab = var, breaks = 20, mar = c(1, 1, 1, 1))
+    mean_val <- mean(data[[var]])
+    abline(v = mean_val, col = "red", lwd = 2)
 }
+#right-skewedness makes sense with values already close to 0. Standard error means quite small across variables, greatest for concavity
+
+#Plot Worst Values
+wrs_vars <- names(data)[grep("worst", names(data))]
+for (var in wrs_vars) {
+  hist(data[[var]], main = var, xlab = var, breaks = 20, mar = c(1, 1, 1, 1))
+  mean_val <- mean(data[[var]])
+  abline(v = mean_val, col = "red", lwd = 2)
+}
+
 ```
 
-```{r Features Eli}
-#| warnings: false
-#| echo: false
 
-alpha <- 0.05
+We investigated the data by summarizing and plotting histograms of all feature variables. The dataset consists of 569 observations and contains 30 features, consisting of the mean, standard error and worst value of 10 different metrics.
 
+All features are numeric and in essence normally distributed, though many are heavily right-skewed. This is reasonable for the standard error and worst value features as they consist of values close to 0 and thus cannot be left-skewed. It is unclear why many of the mean features are right skewed.
+
+
+```{r Exploration_In}
+
+barplot(table(data$diagnosis)) # simple bar plot showing beningn/malignant 
+
+paste0(round((length(which(data$diagnosis =="M")) / nrow(data))*100, digits = 2), " percent of all observations are malignant.")
+
+paste0(round((length(which(data$diagnosis =="B")) / nrow(data))*100, digits = 2), " percent of all observations are benign.")
+#length(which(data$diagnosis =="B")) / nrow(data)
+
+```
+
+A simple barplot of the target variable, diagnosis, reveals that the dataset is unbalanced - almost two thirds of all observations are benign, just a bit more than one third are malignant.
+
+## Feature Selection
+
+```{r Feature Selection - Feature Target Correlation}
+
+#| label: setup
+#| message: false
+
+
+
+#get correlation to target variable
 target <- data %>%
                  mutate(diagnosis = ifelse(diagnosis == "M", 1, 0)) %>%
                   select(diagnosis)
 target <- target$diagnosis
 
 #Check correlations between target variable and others in a comprehensible fashion
-association_list <- lapply(data[-c(1:2)], function(var) {
+corr_list <- lapply(data[-1], function(var) {
   cor_val <- cor(var, target, method = "pearson")  # Point Biserial Correlation as numeric and binary variable
   return(cor_val)
 })
 
-#Print results
-names(association_list) <- names(data)[-c(1:2)] 
-print(association_list)
+#turn into df and inspect
+names(corr_list) <- names(data)[-1]
 
+corr_df <- data.frame(variable = character(), p_value = numeric(), significant = character(), stringsAsFactors = FALSE)
 
+corr_df <- do.call(rbind, lapply(names(corr_list), function(var_name) {
+  data.frame(variable = var_name,
+             correlation = corr_list[[var_name]][[1]],
+             stringsAsFactors = FALSE)
+}))
+print(corr_df)
 
-# Perform ANOVA for each variable against the target variable
-result_list <- lapply(data[-c(1:2)], function(var) {
-  aov_result <- aov(target ~ var, data = data)
-  p_value <- summary(aov_result)[[1]]$"Pr(>F)"[1]
+alpha <- 0.05
+# Perform Logistic Regression for each variable against the target variable
+logreg_list <- lapply(names(data)[-1], function(var) {
+  logistic_model <- glm(target ~ ., data = data[var], family = binomial)
+  p_value <- summary(logistic_model)$coefficients[, "Pr(>|z|)"][2]
   significant <- ifelse(p_value < alpha, "Yes", "No")
   return(data.frame(p_value = p_value, significant = significant))
-})
+  })
 
-# Print ANOVA results for each variable
-names(result_list) <- names(data)[-c(1:2)]  # Assign variable names to ANOVA results
-print(result_list)
+#turn into df and inspect
+names(logreg_list) <- names(data)[-1]
+logreg_df <- data.frame(variable = character(), p_value = numeric(), significant = character(), stringsAsFactors = FALSE)
 
+logreg_df <- do.call(rbind, lapply(names(logreg_list), function(var_name) {
+  data.frame(variable = var_name,
+             p_value = logreg_list[[var_name]]$p_value,
+             significant = logreg_list[[var_name]]$significant,
+             stringsAsFactors = FALSE)
+}))
+print(logreg_df)
 
 #Findings:
 
@@ -147,18 +205,47 @@ print(result_list)
 #-> That's also where the anova test yields insignificant results. Dropping these features likely will not decrease model performance.
 ```
 
-```{r Feature Selection}
-#| echo: false
+```{r Feature Selection - Feature Correlation}
 
 # Feature selection? Not really needed
 dim(data)
 
 df_corr <- cor(data %>% select(-diagnosis))
-corrplot::corrplot(df_corr, order = "hclust", tl.cex = 1, addrect = 8)
+corrplot::corrplot(df_corr, order = "hclust", tl.cex = 0.8, addrect = 8)
 
 data2 <- data %>% select(-findCorrelation(df_corr, cutoff = 0.9))
-detach("package:caret", unload = TRUE) # causes problems with metrics
+detach("package:caret", unload = TRUE)
 ```
+
+We investigated both the correlation of all features with the target variable as well as pair-wise correlation between the features.
+
+```{r Feature Selection In - Feature Target Correlation}
+
+tab1_head <- "Table 1: Feature Target Correlation"
+tab1_dat <- knitr::kable(corr_df[corr_df$correlation < 0.5,], format = "markdown")
+tab1 <- paste(tab1_head, tab1_dat, sep = "")
+cat(tab1)
+
+tab2_head <- "Table 2: Feature Target Regression"
+tab2_dat <- knitr::kable(logreg_df[logreg_df$significant == "No",], format = "markdown")
+tab2 <- paste(tab2_head, tab2_dat, sep = "")
+cat(tab2)
+
+```
+
+Inspecting the correlation between the features and the target variable revealed low correlation values for the features presented in Table 1. A simple logistic regression further revealed a statistically insignificant relation between the target variable and the features shown in Table 2. 
+
+A correlation plot of the feature variables reveals high correlations between some of them. Cutting features with a correlation greater than 0.9. would lead to a reduction by 10 features, greatly reducing the dimensionality of the data.
+
+```{r Feature Selection In - Feature Correlation}
+# Feature selection? Not really needed
+
+corrplot::corrplot(df_corr, order = "hclust", tl.cex = 0.8, addrect = 8)
+
+```
+
+However, since we are using xgboost and lasso regression on a small dataset, it is not necessary to cut features with high correlation. This yields little in terms of computing speed and omits data that is nevertheless useful as there is no perfect correlation between the features. We did, however, omit features presented in Table 2 with insignificant relation to the target variable.
+
 
 # Model Comparison
 

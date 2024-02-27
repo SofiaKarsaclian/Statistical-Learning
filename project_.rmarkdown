@@ -1,0 +1,582 @@
+---
+title: "Stat Learning Project"
+author: "Sofía Karsaclian, Elias Heppner, Andri Rutschmann"
+format:
+  html:
+    embed-resources: true
+editor: visual
+---
+
+
+## Statistical Learning: Final Project
+
+-   Sofía Karsaclian (01/1246546)
+-   Elias Heppner (01/1244414)
+-   Andri Rutschmann (01/1246603)
+
+
+```{r Setup}
+#| label: setup
+#| message: false
+#| echo: false
+
+library(tidyverse)
+library(tidymodels)
+library(xgboost)
+library(doParallel)
+library(caret)
+library(psych)
+library(glmnet)
+library(pROC)
+library(knitr)
+
+seed = 3 # because we're three pros working on this project!
+target_metric = 'recall' # measure of model performance
+
+# Used to speed up XGBoost with parallel processing
+all_cores = detectCores(logical = TRUE)
+cl = makePSOCKcluster(all_cores)
+registerDoParallel(cl)
+
+# Preprocessing
+data = read.csv('BreastCancer.csv') # load data (there is an NA col nameed X)
+sum(is.na(data$X)) # so col X is only NA lets remove it
+
+data = data %>%
+  select(-X, -id) # take out id
+any(is.na(data)) # there are no NA rows in the data set
+```
+
+
+# Data Exploration and Feature Selection
+
+## Exploration
+
+
+```{r Exploration}
+#| eval: false
+#| echo: false
+
+#| label: setup
+#| message: false
+
+describe(data)#get an overview 
+
+prop.table(table(data$diagnosis))
+barplot(table(data$diagnosis)) # simple bar plot showing beningn/malignant dist
+
+#Plot means in histogram
+mean_vars <- names(data)[grep("mean", names(data))]
+
+# Plot histograms for variables containing the word "mean"
+# par(mfrow = c(ceiling(length(mean_vars) / 2), 2))  # Set up multiple plots per page
+for (var in mean_vars) {
+  hist(data[[var]], main = var, xlab = var, breaks = 20)
+  mean_val <- mean(data[[var]])
+  abline(v = mean_val, col = "red", lwd = 2)
+}
+#-> not normally distributed, all right-skewed
+
+#Plot standard errors
+se_vars <- names(data)[grep("se", names(data))]
+
+# Set up multiple scatterplots
+# par(mfrow = c(ceiling(length(se_vars) / 2), 2))  # Set up multiple plots per page
+
+# Create scatterplots for variables containing the word "se" against the target variable
+for (var in se_vars) {
+  hist(data[[var]], main = var, xlab = var, breaks = 20, mar = c(1, 1, 1, 1))
+    mean_val <- mean(data[[var]])
+    abline(v = mean_val, col = "red", lwd = 2)
+}
+#right-skewedness makes sense with values already close to 0. Standard error means quite small across variables, greatest for concavity
+
+#Plot Worst Values
+wrs_vars <- names(data)[grep("worst", names(data))]
+for (var in wrs_vars) {
+  hist(data[[var]], main = var, xlab = var, breaks = 20, mar = c(1, 1, 1, 1))
+  mean_val <- mean(data[[var]])
+  abline(v = mean_val, col = "red", lwd = 2)
+}
+
+```
+
+
+
+We investigated the data by summarizing and plotting histograms of all feature variables. The dataset consists of 569 observations and contains 30 features, consisting of the mean, standard error and worst value of 10 different metrics.
+
+All features are numeric and in essence normally distributed, though many are heavily right-skewed. This is reasonable for the standard error and worst value features as they consist of values close to 0 and thus cannot be left-skewed. It is unclear why many of the mean features are right skewed.
+
+
+
+```{r Exploration_In}
+
+barplot(table(data$diagnosis)) # simple bar plot showing beningn/malignant 
+
+paste0(round((length(which(data$diagnosis =="M")) / nrow(data))*100, digits = 2), " percent of all observations are malignant.")
+
+paste0(round((length(which(data$diagnosis =="B")) / nrow(data))*100, digits = 2), " percent of all observations are benign.")
+#length(which(data$diagnosis =="B")) / nrow(data)
+
+```
+
+
+A simple barplot of the target variable, diagnosis, reveals that the dataset is unbalanced - almost two thirds of all observations are benign, just a bit more than one third are malignant.
+
+## Feature Selection
+
+
+```{r Feature Selection - Feature Target Correlation}
+
+#| label: setup
+#| message: false
+
+
+
+#get correlation to target variable
+target <- data %>%
+                 mutate(diagnosis = ifelse(diagnosis == "M", 1, 0)) %>%
+                  select(diagnosis)
+target <- target$diagnosis
+
+#Check correlations between target variable and others in a comprehensible fashion
+corr_list <- lapply(data[-1], function(var) {
+  cor_val <- cor(var, target, method = "pearson")  # Point Biserial Correlation as numeric and binary variable
+  return(cor_val)
+})
+
+#turn into df and inspect
+names(corr_list) <- names(data)[-1]
+
+corr_df <- data.frame(variable = character(), p_value = numeric(), significant = character(), stringsAsFactors = FALSE)
+
+corr_df <- do.call(rbind, lapply(names(corr_list), function(var_name) {
+  data.frame(variable = var_name,
+             correlation = corr_list[[var_name]][[1]],
+             stringsAsFactors = FALSE)
+}))
+print(corr_df)
+
+alpha <- 0.05
+# Perform Logistic Regression for each variable against the target variable
+logreg_list <- lapply(names(data)[-1], function(var) {
+  logistic_model <- glm(target ~ ., data = data[var], family = binomial)
+  p_value <- summary(logistic_model)$coefficients[, "Pr(>|z|)"][2]
+  significant <- ifelse(p_value < alpha, "Yes", "No")
+  return(data.frame(p_value = p_value, significant = significant))
+  })
+
+#turn into df and inspect
+names(logreg_list) <- names(data)[-1]
+logreg_df <- data.frame(variable = character(), p_value = numeric(), significant = character(), stringsAsFactors = FALSE)
+
+logreg_df <- do.call(rbind, lapply(names(logreg_list), function(var_name) {
+  data.frame(variable = var_name,
+             p_value = logreg_list[[var_name]]$p_value,
+             significant = logreg_list[[var_name]]$significant,
+             stringsAsFactors = FALSE)
+}))
+print(logreg_df)
+
+#Findings:
+
+#Correlation with Target Variable Below 0.5:
+# 
+# texture_mean
+#  0.4151853
+# smoothness_mean
+#  0.3585
+# symmetry_mean
+#  0.3304986
+# fractal_dimension_mean
+#  -0.0128376
+# texture_se
+#  -0.008303333
+# smoothness_se
+#  -0.06701601
+# concavity_se
+#  0.2537298
+# symmetry_se
+#  -0.006521756
+# fractal_dimension_se
+#  0.07797242
+# texture_worst
+#  0.4569028
+# smoothness_worst
+#  0.4214649
+# symmetry_worst
+#  0.4162943
+# fractal_dimension_worst
+#  0.3238722
+
+#Below 0.2 for fractal_dimension_mean, texture_se, smoothness_se, symmetry_se, fractal_dimension_se
+#-> That's also where the anova test yields insignificant results. Dropping these features likely will not decrease model performance.
+```
+
+```{r Feature Selection - Feature Correlation}
+
+# Feature selection? Not really needed
+dim(data)
+
+df_corr <- cor(data %>% select(-diagnosis))
+corrplot::corrplot(df_corr, order = "hclust", tl.cex = 0.8, addrect = 8)
+
+data2 <- data %>% select(-findCorrelation(df_corr, cutoff = 0.9))
+detach("package:caret", unload = TRUE)
+```
+
+
+We investigated both the correlation of all features with the target variable as well as pair-wise correlation between the features.
+
+
+```{r Feature Selection In - Feature Target Correlation}
+
+tab1_head <- "Table 1: Feature Target Correlation"
+tab1_dat <- knitr::kable(corr_df[corr_df$correlation < 0.5,], format = "markdown")
+tab1 <- paste(tab1_head, tab1_dat, sep = "")
+cat(tab1)
+
+tab2_head <- "Table 2: Feature Target Regression"
+tab2_dat <- knitr::kable(logreg_df[logreg_df$significant == "No",], format = "markdown")
+tab2 <- paste(tab2_head, tab2_dat, sep = "")
+cat(tab2)
+
+```
+
+
+Inspecting the correlation between the features and the target variable revealed low correlation values for the features presented in Table 1. A simple logistic regression further revealed a statistically insignificant relation between the target variable and the features shown in Table 2. 
+
+A correlation plot of the feature variables reveals high correlations between some of them. Cutting features with a correlation greater than 0.9. would lead to a reduction by 10 features, greatly reducing the dimensionality of the data.
+
+
+```{r Feature Selection In - Feature Correlation}
+# Feature selection? Not really needed
+
+corrplot::corrplot(df_corr, order = "hclust", tl.cex = 0.8, addrect = 8)
+
+```
+
+
+However, since we are using xgboost and lasso regression on a small dataset, it is not necessary to cut features with high correlation. This yields little in terms of computing speed and omits data that is nevertheless useful as there is no perfect correlation between the features. We did, however, omit features presented in Table 2 with insignificant relation to the target variable.
+
+
+# Model Comparison
+
+
+```{r Train Test Setup}
+# For model evaluation it is easiest to set the positive (malignant) as fist level
+data$diagnosis = factor(data$diagnosis, levels = c('M', 'B'))
+data2 = data %>% 
+  select(-fractal_dimension_mean, -texture_se, -smoothness_se, -symmetry_se, -fractal_dimension_se)
+
+# Creating train/test splits
+train_test = 0.6 # define how much of the data is used as training/test data
+set.seed(seed)
+training_split = initial_split(data, prop = train_test, strata = diagnosis)
+
+train = training(training_split)
+test = testing(training_split) # we don't really need this since we use last_fit()
+```
+
+
+We are going to compare two different models for this project: eXtreme Gradient Boosting and Lasso Regression. Due to this choice we do not need to perform normalization and feature selection ourselves.<br>
+XGBoost being a decision tree based model does not require normalization and due to our use of the glmnet library normalization is performed automatically when we fit our lasso regression.<br>
+Regarding feature selection we exploit the fact that XGBoost as well as lasso inherently perform feature selection. XGBoost does so due to the fact that the maximum tree depth is limited to a specific $n$ and the algorithm therefore only splits on the $n$ most informative splitting criteria. Lasso uses a penalty to restrict the number of features that influence the model thereby reducing dimensionality.<br>
+
+Using Emil Hvitfeldt's and Julia Silge's 'Supervised Machine Learning for Text Analysis in R' we fit both models using the tidymodels R package.
+
+## eXtreme Gradient Boosting (XGBoost)
+
+The first model we want to investigate is the 'Kaggle-famous' XGBoost model. Known for its impressive performance on many Kaggle challenges.
+We started off by fitting a model using the xgboost default values for all hyperparameters except the number of trees which we tuned (model 1). This model already performs quite well. We then also tuned the maximum tree depth, which usually defaults to $6$ (model 2), which yielded an increase in performance. Finally, we went ahead and tuned all tunable hyperparameters (model 3) to achieve the best performance.<br>
+Interestingly enough, model 3 didn't outperform model 1 and 2 when we used an 80/20 distribution for our training/test split. Using a 60/40 training/test split, though, model 3 achieved a recall of $0.96$ instead of model 1 and 2's respective $0.92$.<br>
+
+
+```{r Gradient Boosting Training - 1}
+#| warnings: false
+#| echo: false
+
+# Create tuning recipe
+tune_rec = recipe(diagnosis ~ ., data = train)
+
+# Specify k-fold CV (10-fold)
+set.seed(seed)
+folds = vfold_cv(train, v = 10)
+
+model_nr = 1
+
+# XGBoost model specification
+if(model_nr == 1){ # model with less tuned parameters
+  xg_spec = boost_tree(trees = tune()) %>%
+    set_engine("xgboost") %>%
+    set_mode("classification")
+  
+  model_name = "xg_trees"
+}else if(model_nr == 2){ # model with more tuned parameters (optimal)
+  xg_spec = boost_tree(trees = tune(),
+                      tree_depth = tune()) %>%
+    set_engine("xgboost") %>%
+    set_mode("classification")
+  
+  model_name = "xg_trees_depth"
+}else{ # model with even more tuned parameters
+  xg_spec = boost_tree(trees = tune(),
+                       min_n = tune(),
+                       tree_depth = tune(),
+                       learn_rate = tune(),
+                       loss_reduction = tune()) %>%
+    set_engine("xgboost") %>%
+    set_mode("classification")
+  
+  model_name = "xg_trees_depth_n_rate_reduction"
+}
+
+# XGBoost work flow
+xg_wf = workflow() %>% 
+  add_recipe(tune_rec) %>% 
+  add_model(xg_spec)
+
+# Lambda grid for model tuning
+if(model_nr == 1){ # grid for model with less tuned parameters
+  lambda_grid = grid_regular(
+    trees(range = c(1, 50)),
+    levels = c(trees = 50)
+  )
+}else if(model_nr == 2){ # grid for model with more tuned parameters (optimal)
+  lambda_grid = grid_regular(
+    trees(range = c(1, 50)),
+    tree_depth(range = c(1, 10)),
+    levels = c(trees = 50,
+               tree_depth  = 10)
+  )
+}else{ # grid for model with even more tuned parameters
+  lambda_grid = grid_regular(
+    trees(range = c(30, 50)),
+    min_n(range = c(1, 50)),
+    tree_depth(range = c(1, 10)),
+    learn_rate(range = c(0, 1)),
+    loss_reduction(range = c(0, 1)),
+    levels = c(trees = 20,
+               min_n = 5,
+               tree_depth  = 10,
+               learn_rate = 5,
+               loss_reduction = 5)
+  )
+}
+
+# Model training
+metrics = metric_set(f_meas, precision, recall, roc_auc) # specify metrics
+
+set.seed(seed)
+xg_rs = tune_grid( # specify individual components with tune_grid
+  xg_wf, # workflow to be used
+  folds, # different folds
+  grid = lambda_grid, # lambda grid for tuning
+  control = control_resamples(save_pred = TRUE), # save all metrics (not just default)
+  metrics = metrics # specify metrics
+)
+
+xg_rs %>% 
+  show_best(target_metric)
+```
+
+```{r Gradient Boosting Training - 2}
+#| echo: false
+
+# collect_metrics(xg_rs, summarize = TRUE) # get model metrics
+best_model = select_best(xg_rs, metric = target_metric) # select best model according to target metric
+print(best_model)
+
+# Use best model for finalization
+xg_wf_final = finalize_workflow(
+  xg_wf, best_model
+  )
+
+# Get model performance on test split
+xg_final = last_fit(
+  xg_wf_final, training_split, metrics = metrics
+  )
+
+# Save - only really necessary for the model with the most tuned parameters
+if(train_test == 0.8){
+  folder = '80_20'
+}else{
+  folder = '60_40'
+}
+saveRDS(xg_final, paste0(folder, '/', model_name, ".RDS")) # takes several mins to re-fit model
+
+collect_metrics(xg_final)
+```
+
+```{r Load XGBoost Model(s)}
+#| echo: false
+
+xg_trees = readRDS(paste0(folder, '/', "xg_trees.RDS"))
+xg_trees_depth = readRDS(paste0(folder, '/', "xg_trees_depth.RDS"))
+xg_trees_depth_n_rate_reduction = readRDS(paste0(folder, '/', "xg_trees_depth_n_rate_reduction.RDS"))
+```
+
+```{r Print XGBoost Comparison}
+#| echo: true
+
+collect_metrics(xg_trees)
+collect_metrics(xg_trees_depth)
+collect_metrics(xg_trees_depth_n_rate_reduction)
+```
+
+
+We see that the 'simplest' model performs best. It seems that tuning only the number of decision trees used in the XGBoost fitting hit some sort of sweet spot. Tuning for tree depth as well seems to ...
+
+
+```{r Lasso Regression}
+#| echo: false
+
+# specify model
+lasso_spec <- logistic_reg(penalty = 0.01, mixture = 1) %>%
+  set_mode("classification") %>%
+  set_engine("glmnet")
+
+# specify workflow
+lasso_wf <- workflow() %>%
+  add_recipe(tune_rec) %>%
+  add_model(lasso_spec)
+
+# 10 fold CV
+set.seed(seed)
+diag_folds <- vfold_cv(train, v = 10)
+
+set.seed(seed)
+lasso_rs <- fit_resamples(
+  lasso_wf,
+  diag_folds,
+  control = control_resamples(save_pred = TRUE),
+  metrics = metrics
+)
+
+# metrics from cv
+lasso_rs_metrics <- collect_metrics(lasso_rs)
+lasso_rs_predictions <- collect_predictions(lasso_rs)
+
+lasso_rs_metrics
+# roc curve - pretty neat
+lasso_rs_predictions %>%
+  group_by(id) %>%
+  roc_curve(truth = diagnosis, .pred_M) %>%
+  autoplot() 
+```
+
+
+Through the penalty parameter in Lasso classification we can do feature selection. We initialized the lasso classificator with a penalty of 0.01 and fitted this initial model into a 10-fold cross-validation of the training data. Even with this initial model, the ROC-AUC plot shows that the performance is excellent (𝜇= 0.993). Recall, however, is slightly lower, and this is a very important metric in cancer detection, so we are going to try to improve it through hyperparameter tuning.
+
+
+```{r Tuning Lassos Penalty Parameter}
+#| echo: false
+
+# Tuning for choosing best penalty - although pretty good already
+# model tuning
+tune_spec <- logistic_reg(penalty = tune(), mixture = 1) %>%
+  set_mode("classification") %>%
+  set_engine("glmnet")
+
+# create a regular grid of values to try
+# grid_regular chooses sensible values to try for regularization penalty
+lambda_grid <- grid_regular(penalty(), levels = 100)
+# lambda_grid
+
+# workflow for tuning
+tune_wf <- workflow() %>%
+  add_recipe(tune_rec) %>%
+  add_model(tune_spec)
+
+set.seed(seed)
+tune_rs <- tune_grid(
+  tune_wf,
+  diag_folds,
+  grid = lambda_grid,
+  control = control_resamples(save_pred = TRUE),
+  metrics = metrics
+)
+
+autoplot(tune_rs) 
+
+tune_rs %>% # show the best models and their respective penalties
+  show_best(target_metric) 
+
+chosen_l1 <- tune_rs %>%
+  select_best(metric = target_metric)
+
+print(chosen_l1)
+```
+
+
+We tune the model's $l_1$ penalty by creating a grid of 100 sensible values to try with `grid_regular`. We learn that the value of $l_1$ that yields the best recall (𝜇= 0.96) is 0.0024, and that this value also yields high roc_auc.
+
+
+```{r Lasso Performance}
+#| echo: false
+
+final_lasso <- finalize_workflow(tune_wf, chosen_l1)
+
+fitted_lasso <- fit(final_lasso, train)
+
+fitted_lasso %>%
+  extract_fit_parsnip() %>%
+  tidy() %>%
+  filter(estimate != 0) %>%
+  arrange(estimate)
+
+# Evaluate on test data 
+lasso_final <- last_fit(final_lasso, split = training_split, metrics = metrics)
+collect_metrics(lasso_final, summarize = TRUE)
+collect_predictions(lasso_final)
+
+# Plot ROC curve
+predictions <- lasso_final %>%
+  collect_predictions()
+
+roc_data <- roc(predictions$diagnosis, predictions$.pred_M)
+plot(roc_data, main = "ROC Curve", col = "blue", lwd = 2)
+```
+
+
+Finally, we fit the Lasso with the tuned penalty to the train data, and evaluate the performance on the test data. The model performs really well, with a high capability of distinguishing classes (ROC AUC = 99.39%), and a high recall (96.68%) which means that the model is effective at capturing most positive cases, minimizing false negatives.
+
+With a penalty parameter set at 0.0024, the majority of coefficients were effectively regularized to zero, resulting in the selection of 14 features considered most important for the classification.
+
+Among these, the variable that contributes the most to classify the breast mass as malign is the compactness SE: the more changes or variations in the mass' compactness, the more likely for it to be classified as malign. In a lesser extent, mean fractal dimension also contributes for a malign classification.
+
+On the other hand, higher values of smoothness, concavity and symmetry are associated with a more likely benign classification. These features seem to be characteristics observed in non-cancerous masses.
+
+
+```{r SVM}
+#| echo: false
+
+# library(e1071)
+# 
+# svm_model <- svm(diagnosis ~ ., data = train, kernel = "radial")
+# 
+# predictions <- predict(svm_model, newdata = test)
+# library(caret)
+# 
+# # Assuming 'predictions' are the predicted class labels and 'true_labels' are the true class labels
+# confusion_matrix <- confusionMatrix(predictions, test$diagnosis)
+# 
+# # Calculate precision
+# precision <- confusion_matrix$byClass["Precision"]
+# 
+# # Calculate recall (Sensitivity)
+# recall <- confusion_matrix$byClass["Sensitivity"]
+# 
+# # Calculate F1 score
+# f1_score <- confusion_matrix$byClass["F1"]
+# 
+# # Calculate AUC-ROC
+# auc_roc <- confusion_matrix$byClass["ROC"]
+# 
+# # Print or use the metrics as needed
+# print(precision)
+# print(recall)
+# print(f1_score)
+# print(auc_roc)
+```
+
