@@ -25,7 +25,7 @@ library(psych)
 library(glmnet)
 
 seed = 3 # because we're three pros working on this project!
-target_metric = 'recall' # measure of model performance
+target_metric = 'roc_auc' # measure of model performance
 
 # Used to speed up XGBoost with parallel processing
 all_cores = detectCores(logical = TRUE)
@@ -143,8 +143,7 @@ print(result_list)
 
 ```
 
-```{r}
-
+```{r Feature Selection}
 # Feature selection? Not really needed
 dim(data)
 
@@ -155,13 +154,25 @@ data2 <- data %>% select(-findCorrelation(df_corr, cutoff = 0.9))
 detach("package:caret", unload = TRUE)
 ```
 
+# Model Comparison
+
+We are going to compare two different models for this project: eXtreme Gradient Boosting and Lasso Regression.
+
+Due to this choice we do not need to perform feature selection. XGBoost being a decision tree based model does no
+
+## eXtreme Gradient Boosting (XGBoost)
+
+The first model we want to investigate is the 'Kaggle-famous' XGBoost model. Known for its impressive performance on many Kaggle challenges.
+
 ```{r Gradient Boosting}
+#| warnings: false
 # For model evaluation it is easiest to set the positive (malignant) as fist level
 data$diagnosis = factor(data$diagnosis, levels = c('M', 'B'))
+data2 = data %>% 
+  select(-fractal_dimension_mean, -texture_se, -smoothness_se, -symmetry_se, -fractal_dimension_se)
 
 # Creating train/test splits
 set.seed(seed)
-
 training_split = initial_split(data, prop = 0.6, strata = diagnosis)
 
 train = training(training_split)
@@ -175,7 +186,10 @@ set.seed(seed)
 folds = vfold_cv(train, v = 10)
 
 # XGBoost model specification
-xg_spec = boost_tree(trees = tune()) %>% 
+xg_spec = boost_tree(trees = tune(),
+                     tree_depth = tune(),
+                     learn_rate = tune(),
+                     loss_reduction = tune()) %>% 
   set_engine("xgboost") %>% 
   set_mode("classification")
 
@@ -185,16 +199,26 @@ xg_wf = workflow() %>%
   add_model(xg_spec)
 
 # Lambda grid for model tuning
+# xg_params = parameters(
+#   trees(),
+#   tree_depth(),
+#   learn_rate(),
+#   loss_reduction()
+# )
+
 lambda_grid = grid_regular(
-  trees(range = c(1, 1000)), # set tree range
-  levels = c(trees = 1000) # and levels (how many steps in tree range)
+  trees(range = c(1, 60)),
+  tree_depth(range = c(1, 30)),
+  learn_rate(range = c(0, 1)),
+  loss_reduction(range = c(0, 1)),
+  levels = c(trees = 60,
+             tree_depth  = 30,
+             learn_rate = 10,
+             loss_reduction = 10)
 )
 
 # Model training
 metrics = metric_set(f_meas, precision, recall, roc_auc) # specify metrics
-
-start = Sys.time() # Get some duration info
-paste('Start:', start)
 
 set.seed(seed)
 xg_rs = tune_grid( # specify individual components with tune_grid
@@ -205,10 +229,13 @@ xg_rs = tune_grid( # specify individual components with tune_grid
   metrics = metrics # specify metrics
 )
 
-print(Sys.time() - start) # How long did the training take?
+# autoplot(xg_rs)
 
-collect_metrics(xg_rs, summarize = TRUE) # get model metrics
-best_model = select_best(xg_rs, metric = target_metric, trees) # select best model according to target metric
+xg_rs %>% 
+  show_best(target_metric)
+
+# collect_metrics(xg_rs, summarize = TRUE) # get model metrics
+best_model = select_best(xg_rs, metric = target_metric) # select best model according to target metric
 print(best_model)
 
 # Use best model for finalization
@@ -226,8 +253,8 @@ collect_metrics(xg_final)
 # Save... a bit unnecessary since training only takes a few seconds
 # saveRDS(xg_final, "model_xgboost_feature_selected.RDS")
 
-collect_predictions(xg_final) %>% 
-  select(id, .row, diagnosis, .pred_class)
+# collect_predictions(xg_final) %>% 
+#   select(id, .row, diagnosis, .pred_class)
 ```
 
 ```{r Lasso Regression}
@@ -273,7 +300,7 @@ tune_spec <- logistic_reg(penalty = tune(), mixture = 1) %>%
 # create a regular grid of values to try
 # grid_refuls chooses sensible values to try for regularization penalty
 lambda_grid <- grid_regular(penalty(), levels = 100)
-lambda_grid
+# lambda_grid
 
 # workflow for tuning
 tune_wf <- workflow() %>%
@@ -298,14 +325,16 @@ tune_rs %>% # show the best models and their respective penalties
 chosen_auc <- tune_rs %>%
   select_best(metric = target_metric)
 
+print(chosen_auc)
+
 final_lasso <- finalize_workflow(tune_wf, chosen_auc)
 
 fitted_lasso <- fit(final_lasso, train)
 
-fitted_lasso %>%
-  extract_fit_parsnip() %>%
-  tidy() %>%
-  arrange(estimate)
+# fitted_lasso %>%
+#   extract_fit_parsnip() %>%
+#   tidy() %>%
+#   arrange(estimate)
 
 # Chosen terms: concave points(worst and mean), and worst measures for smoothness, symmetry, radius and texture. Worst measure for concave points its the most important predictor.
 
