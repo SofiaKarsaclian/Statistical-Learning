@@ -13,10 +13,8 @@ editor: visual
 -   Elias Heppner (01/1244414)
 -   Andri Rutschmann (01/1246603)
 
-```{r Setup}
-#| label: setup
+```{r Setup, echo = FALSE, warning = FALSE, output = FALSE}
 #| message: false
-#| echo: false
 
 library(tidyverse)
 library(tidymodels)
@@ -49,7 +47,7 @@ any(is.na(data)) # there are no NA rows in the data set
 
 ## Exploration
 
-```{r Exploration}
+```{r Exploration, echo = FALSE, warning = FALSE}
 #| eval: false
 #| echo: false
 
@@ -103,26 +101,31 @@ We investigated the data by summarizing and plotting histograms of all feature v
 All features are numeric and in essence normally distributed, though many are heavily right-skewed. This is reasonable for the standard error and worst value features as they consist of values close to 0 and thus cannot be left-skewed. It is unclear why many of the mean features are right skewed.
 
 
-```{r Exploration_In}
+```{r Exploration_In1, echo = FALSE, results = 'asis'}
 
-barplot(table(data$diagnosis)) # simple bar plot showing beningn/malignant 
-
-paste0(round((length(which(data$diagnosis =="M")) / nrow(data))*100, digits = 2), " percent of all observations are malignant.")
-
-paste0(round((length(which(data$diagnosis =="B")) / nrow(data))*100, digits = 2), " percent of all observations are benign.")
-#length(which(data$diagnosis =="B")) / nrow(data)
-
+# Create the bar plot
+barplot(table(data$diagnosis), col = "black", main = "Diagnosis Distribution", xlab = "Diagnosis", ylab = "Count")
+title(main = "Diagnosis Distribution", xlab = "Diagnosis", ylab = "Count")
 ```
 
-A simple barplot of the target variable, diagnosis, reveals that the dataset is unbalanced - almost two thirds of all observations are benign, just a bit more than one third are malignant.
+
+```{r Exploration_In2, echo = FALSE, results = 'asis'}
+
+malig <- paste0(round((length(which(data$diagnosis =="M")) / nrow(data))*100, digits = 2), " percent of all observations are malignant.")
+
+benign <- paste0(round((length(which(data$diagnosis =="B")) / nrow(data))*100, digits = 2), " percent of all observations are benign.")
+#length(which(data$diagnosis =="B")) / nrow(data)
+
+#print(malig)
+
+#print(benign)
+```
+
+A simple barplot of the target variable, diagnosis, reveals that the dataset is unbalanced. About 37 percent of all observations are malignant, whereas 63 percent are benign.
 
 ## Feature Selection
 
-```{r Feature Selection - Feature Target Correlation}
-
-#| label: setup
-#| message: false
-
+```{r Feature Selection - Feature Target Correlation, echo = FALSE, warning = FALSE, output = FALSE}
 
 
 #get correlation to target variable
@@ -205,7 +208,7 @@ print(logreg_df)
 #-> That's also where the anova test yields insignificant results. Dropping these features likely will not decrease model performance.
 ```
 
-```{r Feature Selection - Feature Correlation}
+```{r Feature Selection - Feature Correlation, echo = FALSE, warning = FALSE, output = FALSE}
 
 # Feature selection? Not really needed
 dim(data)
@@ -219,25 +222,25 @@ detach("package:caret", unload = TRUE)
 
 We investigated both the correlation of all features with the target variable as well as pair-wise correlation between the features.
 
-```{r Feature Selection In - Feature Target Correlation}
+Table 1
+```{r Feature Selection In1 - Feature Target Correlation,  echo = FALSE, results = 'asis'}
 
-tab1_head <- "Table 1: Feature Target Correlation"
-tab1_dat <- knitr::kable(corr_df[corr_df$correlation < 0.5,], format = "markdown")
-tab1 <- paste(tab1_head, tab1_dat, sep = "")
-cat(tab1)
-
-tab2_head <- "Table 2: Feature Target Regression"
-tab2_dat <- knitr::kable(logreg_df[logreg_df$significant == "No",], format = "markdown")
-tab2 <- paste(tab2_head, tab2_dat, sep = "")
-cat(tab2)
+corr_df[corr_df$correlation < 0.5,]
 
 ```
 
 Inspecting the correlation between the features and the target variable revealed low correlation values for the features presented in Table 1. A simple logistic regression further revealed a statistically insignificant relation between the target variable and the features shown in Table 2. 
 
+
+Table 2
+```{r Feature Selection In2 - Feature Target Correlation,  echo = FALSE, results = 'asis'}
+
+logreg_df[logreg_df$significant == "No",]
+```
+
 A correlation plot of the feature variables reveals high correlations between some of them. Cutting features with a correlation greater than 0.9. would lead to a reduction by 10 features, greatly reducing the dimensionality of the data.
 
-```{r Feature Selection In - Feature Correlation}
+```{r Feature Selection In - Feature Correlation, echo = FALSE, results = 'asis'}
 # Feature selection? Not really needed
 
 corrplot::corrplot(df_corr, order = "hclust", tl.cex = 0.8, addrect = 8)
