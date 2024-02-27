@@ -25,7 +25,7 @@ library(glmnet)
 library(pROC)
 
 seed = 3 # because we're three pros working on this project!
-target_metric = 'roc_auc' # measure of model performance
+target_metric = 'recall' # measure of model performance
 
 # Used to speed up XGBoost with parallel processing
 all_cores = detectCores(logical = TRUE)
@@ -36,17 +36,14 @@ registerDoParallel(cl)
 data = read.csv('BreastCancer.csv') # load data (there is an NA col nameed X)
 sum(is.na(data$X)) # so col X is only NA lets remove it
 
-data = data %>% 
-  select(-X, -id) # take out id 
+data = data %>%
+  select(-X, -id) # take out id
 any(is.na(data)) # there are no NA rows in the data set
-# 
-
 ```
 
 Okay... Let's go!
 
 ```{r Exploration}
-
 describe(data)#get an overview 
 
 prop.table(table(data$diagnosis))
@@ -71,12 +68,9 @@ par(mfrow = c(ceiling(length(se_vars) / 2), 2))  # Set up multiple plots per pag
 for (var in se_vars) {
   hist(data[[var]], main = var, xlab = var, breaks = 20, mar = c(4,4,2,2))
 }
-
-
 ```
 
 ```{r Features Eli}
-
 alpha <- 0.05
 
 target <- data %>%
@@ -142,19 +136,17 @@ print(result_list)
 
 #Below 0.2 for fractal_dimension_mean, texture_se, smoothness_se, symmetry_se, fractal_dimension_se
 #-> That's also where the anova test yields insignificant results. Dropping these features likely will not decrease model performance.
-
-
 ```
 
 ```{r Feature Selection}
 # Feature selection? Not really needed
 dim(data)
 
-df_corr <- cor(data %>% select(-id, -diagnosis))
+df_corr <- cor(data %>% select(-diagnosis))
 corrplot::corrplot(df_corr, order = "hclust", tl.cex = 1, addrect = 8)
 
 data2 <- data %>% select(-findCorrelation(df_corr, cutoff = 0.9))
-detach("package:caret", unload = TRUE)
+detach("package:caret", unload = TRUE) # causes problems with metrics
 ```
 
 # Model Comparison
@@ -169,6 +161,7 @@ The first model we want to investigate is the 'Kaggle-famous' XGBoost model. Kno
 
 ```{r Gradient Boosting}
 #| warnings: false
+
 # For model evaluation it is easiest to set the positive (malignant) as fist level
 data$diagnosis = factor(data$diagnosis, levels = c('M', 'B'))
 data2 = data %>% 
@@ -176,7 +169,7 @@ data2 = data %>%
 
 # Creating train/test splits
 set.seed(seed)
-training_split = initial_split(data, prop = 0.6, strata = diagnosis)
+training_split = initial_split(data, prop = 0.8, strata = diagnosis)
 
 train = training(training_split)
 test = testing(training_split) # we don't really need this since we use last_fit()
@@ -189,12 +182,22 @@ set.seed(seed)
 folds = vfold_cv(train, v = 10)
 
 # XGBoost model specification
+# xg_spec = boost_tree(trees = tune()) %>%
+#   set_engine("xgboost") %>%
+#   set_mode("classification")
+
 xg_spec = boost_tree(trees = tune(),
-                     tree_depth = tune(),
-                     learn_rate = tune(),
-                     loss_reduction = tune()) %>% 
-  set_engine("xgboost") %>% 
+                     tree_depth = tune()) %>%
+  set_engine("xgboost") %>%
   set_mode("classification")
+
+# xg_spec = boost_tree(trees = tune(),
+#                      min_n = tune(),
+#                      tree_depth = tune(),
+#                      learn_rate = tune(),
+#                      loss_reduction = tune()) %>%
+#   set_engine("xgboost") %>%
+#   set_mode("classification")
 
 # XGBoost work flow
 xg_wf = workflow() %>% 
@@ -202,23 +205,30 @@ xg_wf = workflow() %>%
   add_model(xg_spec)
 
 # Lambda grid for model tuning
-# xg_params = parameters(
-#   trees(),
-#   tree_depth(),
-#   learn_rate(),
-#   loss_reduction()
+# lambda_grid = grid_regular(
+#   trees(range = c(1, 100)),
+#   levels = c(trees = 100)
 # )
 
 lambda_grid = grid_regular(
   trees(range = c(1, 60)),
   tree_depth(range = c(1, 30)),
-  learn_rate(range = c(0, 1)),
-  loss_reduction(range = c(0, 1)),
-  levels = c(trees = 60,
-             tree_depth  = 30,
-             learn_rate = 10,
-             loss_reduction = 10)
+  levels = c(trees = 10,
+             tree_depth  = 10)
 )
+
+# lambda_grid = grid_regular(
+#   trees(range = c(1, 60)),
+#   min_n(range = c(1, 10)),
+#   tree_depth(range = c(1, 30)),
+#   learn_rate(range = c(0, 1)),
+#   loss_reduction(range = c(0, 1)),
+#   levels = c(trees = 10,
+#              min_n = 10,
+#              tree_depth  = 10,
+#              learn_rate = 10,
+#              loss_reduction = 10)
+# )
 
 # Model training
 metrics = metric_set(f_meas, precision, recall, roc_auc) # specify metrics
@@ -254,14 +264,24 @@ xg_final = last_fit(
 collect_metrics(xg_final)
 
 # Save... a bit unnecessary since training only takes a few seconds
-# saveRDS(xg_final, "model_xgboost_feature_selected.RDS")
+# saveRDS(xg_final, "xg_trees_depth_n_rate_reduction.RDS")
 
 # collect_predictions(xg_final) %>% 
 #   select(id, .row, diagnosis, .pred_class)
 ```
 
-```{r Lasso Regression}
+```{r Load XGBoost Model(s)}
+xg_final_1 = readRDS("xg_trees.RDS")
+xg_final_2 = readRDS("xg_trees_depth.RDS")
+xg_final_3 = readRDS("xg_trees_depth_n_rate_reduction.RDS")
 
+collect_metrics(xg_final_1)
+collect_metrics(xg_final_2)
+collect_metrics(xg_final_3)
+```
+
+
+```{r Lasso Regression}
 # specify model
 lasso_spec <- logistic_reg(penalty = 0.01, mixture = 1) %>%
   set_mode("classification") %>%
@@ -294,13 +314,11 @@ lasso_rs_predictions %>%
   group_by(id) %>%
   roc_curve(truth = diagnosis, .pred_M) %>%
   autoplot() 
-
 ```
 
 Through the penalty parameter in Lasso classification we can do feature selection. We initialized the lasso classificator with a penalty of 0.01 and fitted this initial model into a 10-fold cross-validation of the training data. Even with this initial model, the ROC-AUC plot shows that the performance is excellent (𝜇= 0.998). Recall, however, is slightly lower, and this is a very important metric in cancer detection, so we are going to try to improve it through hyperparameter tuning.
 
 ```{r Tuning Lassos penalty parameter}
-
 # Tuning for choosing best penalty - although pretty good already
 # model tuning
 tune_spec <- logistic_reg(penalty = tune(), mixture = 1) %>%
@@ -335,7 +353,6 @@ chosen_l1 <- tune_rs %>%
   select_best(metric = target_metric)
 
 print(chosen_l1)
-
 ```
 
 We tune the model's $l_1$ penalty by creating a grid of 100 sensible values to try with `grid_regular`. We learn that the value of $l_1$ that yields the best recall (𝜇= 0.993) is 0.00059, and that this value also yields high roc_auc.
@@ -366,7 +383,6 @@ plot(roc_data, main = "ROC Curve", col = "blue", lwd = 2)
 Finally, we fit the Lasso with the tuned penalty to the train data, and evaluate the performance on the test data. The model performs really well, with a high capability of distinguishing classes (ROC AUC = 98.12%), and a high recall (95.29%) which means that the model is effective at capturing most positive cases, minimizing false negatives.
 
 ```{r SVM}
-
 library(e1071)
 
 svm_model <- svm(diagnosis ~ ., data = train, kernel = "radial")
