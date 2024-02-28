@@ -253,6 +253,8 @@ However, since we are using xgboost and lasso regression on a small dataset, it 
 # Model Comparison
 
 ```{r Train Test Setup}
+#| echo: false
+
 # For model evaluation it is easiest to set the positive (malignant) as fist level
 data$diagnosis = factor(data$diagnosis, levels = c('M', 'B'))
 # data2 = data %>% 
@@ -271,15 +273,12 @@ We are going to compare two different models for this project: eXtreme Gradient 
 XGBoost being a decision tree based model does not require normalization and due to our use of the glmnet library normalization is performed automatically when we fit our lasso regression.<br>
 Regarding feature selection we exploit the fact that XGBoost as well as lasso inherently perform feature selection. XGBoost does so due to the fact that the maximum tree depth is limited to a specific $n$ and the algorithm therefore only splits on the $n$ most informative splitting criteria. Lasso uses a penalty to restrict the number of features that influence the model thereby reducing dimensionality.<br>
 
-Following Emil Hvitfeldt's and Julia Silge's 'Supervised Machine Learning for Text Analysis in R' we fit both models using the tidymodels R package. We split our data into 80% training and 20% testing data and used 10-fold cross validation to asses model performance.
+Following Emil Hvitfeldt's and Julia Silge's 'Supervised Machine Learning for Text Analysis in R' we fit both models using the tidymodels R package. After testing different distributions we split our data into 80% training and 20% testing data. This resulted in the best model performances. To choose the best hyperparameter settings we used 10-fold cross validation and the recall metric.<br>
+Since it is most important to avoid false negatives when dealing with cancer data we weighed a model's recall more heavily than its F1-score, precision, or roc-auc measure.
 
 ## eXtreme Gradient Boosting (XGBoost)
 
-We started off by fitting a model using the xgboost default values for all hyperparameters except the number of trees which we tuned (model 1). This model already performs quite well. We then also tuned the maximum tree depth, which usually defaults to $6$ (model 2), which yielded an increase in performance. Finally, we went ahead and tuned all tunable hyperparameters (model 3) to achieve the best performance.<br>
-Interestingly enough, model 3 didn't outperform model 1 and 2 when we used an 80/20 distribution for our training/test split. Using a 60/40 training/test split, though, model 3 achieved a recall of $0.96$ instead of model 1 and 2's respective $0.92$.<br>
-
-With XGBoost there are many tunable hyperparameters. We started by fitting a model where we only tuned the number of decision trees used to get a first impression. Following promising performance metrics we also tuned the other hyperparameters.<br>
-
+With XGBoost there are many tunable hyperparameters. With each hyperparameter we would tune the model fitting would take more and more time so we started out with a baseline approach where we only tuned the number of decision trees and used the xgboost R package's default values for the other parameters. Tuning the depth of the trees also, further increased an already good performance. We tried to further improve performance by tuning all hyperparameters but after performing 10-fold cross validation on 25,000 models, a time consuming process, we could not further improve performance. It seems that the default values for learning rate, loss reduction, and minimum node weight hit a sweet spot.
 
 ```{r Gradient Boosting Training - 1}
 #| warnings: false
@@ -292,7 +291,7 @@ tune_rec = recipe(diagnosis ~ ., data = train)
 set.seed(seed)
 folds = vfold_cv(train, v = 10)
 
-model_nr = 3
+model_nr = 1
 
 # XGBoost model specification
 if(model_nr == 1){ # model with less tuned parameters
@@ -365,16 +364,8 @@ xg_rs = tune_grid( # specify individual components with tune_grid
   metrics = metrics # specify metrics
 )
 
-xg_rs %>% 
-  show_best(target_metric)
-```
-
-```{r Gradient Boosting Training - 2}
-#| echo: false
-
 # collect_metrics(xg_rs, summarize = TRUE) # get model metrics
 best_model = select_best(xg_rs, metric = target_metric) # select best model according to target metric
-print(best_model)
 
 # Use best model for finalization
 xg_wf_final = finalize_workflow(
@@ -393,27 +384,44 @@ if(train_test == 0.8){
   folder = '60_40'
 }
 # saveRDS(xg_final, paste0(folder, '/', model_name, ".RDS")) # takes several mins to re-fit model
-
-collect_metrics(xg_final)
 ```
 
 ```{r Load XGBoost Model(s)}
 #| echo: false
 
-xg_trees = readRDS(paste0(folder, '/', "xg_trees.RDS"))
+# xg_trees = readRDS(paste0(folder, '/', "xg_trees.RDS"))
 xg_trees_depth = readRDS(paste0(folder, '/', "xg_trees_depth.RDS"))
 xg_trees_depth_n_rate_reduction = readRDS(paste0(folder, '/', "xg_trees_depth_n_rate_reduction.RDS"))
 ```
 
-```{r Print XGBoost Comparison}
+Below we see the model performance on the test data.<br>
+Once for the model where we only tuned the number of trees and their respective depth (optimal):
+
+```{r Print XGBoost Model 1}
 #| echo: true
 
-collect_metrics(xg_trees)
 collect_metrics(xg_trees_depth)
+```
+
+And for the model where we tuned all hyperparameters:
+
+```{r Print XGBoost Model 2}
+#| echo: true
+
 collect_metrics(xg_trees_depth_n_rate_reduction)
 ```
 
-We see that the 'simplest' model performs best. It seems that tuning only the number of decision trees used in the XGBoost fitting hit some sort of sweet spot. Tuning for tree depth as well seems to ...
+Of course, extensively tuning all parameters will eventually yield the best model. This takes a lot of ressources, though, and due to the fact that we already fitted a model on the default values we did not include them in the grid search for this model. We see that hyperparameter settings for loss reduction, learning rate, and minimum node weight below or above the default values does not increase model performance according to recall.<br> 
+
+The following shows the hyperparameter settings for the best performing XGBoost model:
+
+```{r Parameters of XGBoost}
+#| echo: true
+
+xg_trees_depth$.workflow
+```
+
+## Lasso Regression
 
 ```{r Lasso Regression}
 #| echo: false
@@ -452,7 +460,7 @@ lasso_rs_predictions %>%
   autoplot() 
 ```
 
-Through the penalty parameter in Lasso classification we can do feature selection. We initialized the lasso classificator with a penalty of 0.01 and fitted this initial model into a 10-fold cross-validation of the training data. Even with this initial model, the ROC-AUC plot shows that the performance is excellent (𝜇= 0.993). Recall, however, is slightly lower, and this is a very important metric in cancer detection, so we are going to try to improve it through hyperparameter tuning.
+Through the penalty parameter in Lasso classification we can do feature selection. We initialized the lasso classifier with a penalty of 0.01 and fitted this initial model into a 10-fold cross-validation of the training data. Even with this initial model, the ROC-AUC plot shows that the performance is excellent (𝜇= 0.993). Recall, however, is slightly lower, and this is a very important metric in cancer detection, so we are going to try to improve it through hyperparameter tuning.
 
 ```{r Tuning Lassos Penalty Parameter}
 #| echo: false
