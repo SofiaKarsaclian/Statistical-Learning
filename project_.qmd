@@ -4,6 +4,7 @@ author: "Sofía Karsaclian, Elias Heppner, Andri Rutschmann"
 format:
   html:
     embed-resources: true
+    df-print: kable
 editor: visual
 ---
 
@@ -97,11 +98,9 @@ for (var in wrs_vars) {
 
 ```
 
-
-We investigated the data by summarizing and plotting histograms of all feature variables. The dataset consists of 569 observations and contains 30 features, consisting of the mean, standard error and worst value of 10 different metrics.
+We investigated the data by inspecting summary statistics and plotting histograms of all feature variables. The dataset consists of 569 observations and contains 30 features, consisting of the mean, standard error and worst value of 10 different metrics.
 
 All features are numeric and in essence normally distributed, though many are heavily right-skewed. This is reasonable for the standard error and worst value features as they consist of values close to 0 and thus cannot be left-skewed. It is unclear why many of the mean features are right skewed.
-
 
 ```{r Exploration_In1, echo = FALSE, results = 'asis'}
 
@@ -109,7 +108,6 @@ All features are numeric and in essence normally distributed, though many are he
 barplot(table(data$diagnosis), col = "black", main = "Diagnosis Distribution", xlab = "Diagnosis", ylab = "Count")
 title(main = "Diagnosis Distribution", xlab = "Diagnosis", ylab = "Count")
 ```
-
 
 ```{r Exploration_In2, echo = FALSE, results = 'asis'}
 
@@ -123,7 +121,7 @@ benign <- paste0(round((length(which(data$diagnosis =="B")) / nrow(data))*100, d
 #print(benign)
 ```
 
-A simple barplot of the target variable, diagnosis, reveals that the dataset is unbalanced. About 37 percent of all observations are malignant, whereas 63 percent are benign.
+Concerning the target variable, diagnosis, a simple barplot reveals that the dataset is unbalanced. About 37 percent of all observations are malignant, whereas about 63 percent are benign.
 
 ## Feature Selection
 
@@ -224,23 +222,24 @@ detach("package:caret", unload = TRUE)
 
 We investigated both the correlation of all features with the target variable as well as pair-wise correlation between the features.
 
-Table 1
+*Table 1*
+
 ```{r Feature Selection In1 - Feature Target Correlation,  echo = FALSE, results = 'asis'}
 
-corr_df[corr_df$correlation < 0.5,]
+kable(corr_df[corr_df$correlation < 0.5,], row.names = FALSE)
 
 ```
 
-Inspecting the correlation between the features and the target variable revealed low correlation values for the features presented in Table 1. A simple logistic regression further revealed a statistically insignificant relation between the target variable and the features shown in Table 2. 
+Inspecting the correlation between the features and the target variable revealed low correlation values for the features presented in Table 1. A simple logistic regression further revealed a statistically insignificant relation between the target variable and the features shown in Table 2.
 
+*Table 2*
 
-Table 2
 ```{r Feature Selection In2 - Feature Target Correlation,  echo = FALSE, results = 'asis'}
 
-logreg_df[logreg_df$significant == "No",]
+kable(logreg_df[logreg_df$significant == "No",], row.names = FALSE)
 ```
 
-A correlation plot of the feature variables reveals high correlations between some of them. Cutting features with a correlation greater than 0.9. would lead to a reduction by 10 features, greatly reducing the dimensionality of the data.
+A correlation plot of the feature variables reveals high correlations between some of them. Dropping features with a correlation greater than 0.9. would lead to a reduction by 10 features, greatly reducing the dimensionality of the data.
 
 ```{r Feature Selection In - Feature Correlation, echo = FALSE, results = 'asis'}
 # Feature selection? Not really needed
@@ -249,10 +248,9 @@ corrplot::corrplot(df_corr, order = "hclust", tl.cex = 0.8, addrect = 8)
 
 ```
 
-However, since we are using xgboost and lasso regression on a small dataset, it is not necessary to cut features with high correlation. This yields little in terms of computing speed and omits data that is nevertheless useful as there is no perfect correlation between the features. We did, however, omit features presented in Table 2 with insignificant relation to the target variable.
+Nevertheless, we decided not to omit any features. Given the models we use, neither a high correlation across features nor an insignificant relation to the target variable merit exclusion.
 
-
-# Model Comparison
+# Model Introduction And Comparison
 
 ```{r Train Test Setup}
 #| echo: false
@@ -271,16 +269,13 @@ train = training(training_split)
 test = testing(training_split) # we don't really need this since we use last_fit()
 ```
 
-We are going to compare two different models for this project: eXtreme Gradient Boosting and Lasso Regression. Due to this choice we do not need to perform normalization and feature selection ourselves.<br>
-XGBoost being a decision tree based model does not require normalization and due to our use of the glmnet library normalization is performed automatically when we fit our lasso regression.<br>
-Regarding feature selection we exploit the fact that XGBoost as well as lasso inherently perform feature selection. XGBoost does so due to the fact that the maximum tree depth is limited to a specific $n$ and the algorithm therefore only splits on the $n$ most informative splitting criteria. Lasso uses a penalty to restrict the number of features that influence the model thereby reducing dimensionality.<br>
+We are going to compare two different models for this project: eXtreme Gradient Boosting (XGBoost) and lasso regression. Hence, we do not need to perform normalization and feature selection ourselves.<br> XGBoost, being a decision tree based model, does not require normalization and due to our use of the glmnet library normalization is performed automatically when we fit our lasso regression.<br> Regarding feature selection we exploit the fact that XGBoost as well as lasso inherently perform feature selection. XGBoost does so due to the fact that the maximum tree depth is limited to a specific $n$ and the algorithm therefore only splits on the $n$ most informative splitting criteria. Lasso uses a penalty to restrict the number of features that influence the model thereby reducing dimensionality.<br> Hence, given the small size of the dataset, dropping features yields little in terms of computing speed and omits data that is nevertheless potentially useful for XGBoost and and not detrimental to lasso regression. <br>
 
-Following Emil Hvitfeldt's and Julia Silge's 'Supervised Machine Learning for Text Analysis in R' we fit both models using the tidymodels R package. After testing different distributions we split our data into 80% training and 20% testing data. This resulted in the best model performances. To choose the best hyperparameter settings we used 10-fold cross validation and the recall metric.<br>
-Since it is most important to avoid false negatives when dealing with cancer data we weighed a model's recall more heavily than its F1-score, precision, or roc-auc measure.
+Following Emil Hvitfeldt's and Julia Silge's [Supervised Machine Learning for Text Analysis in R](https://smltar.com/), we fit both models using the tidymodels R package. After cross-validating different distributions we split our data into 80% training and 20% testing data. This resulted in the best model performances. To optimize hyperparameter settings we used 10-fold cross validation and the recall metric.<br> We regarded it as most important to avoid false negatives when dealing with cancer data, leading us to weigh a model's recall more heavily than its F1-score, precision, or roc-auc measure.
 
 ## eXtreme Gradient Boosting (XGBoost)
 
-With XGBoost there are many tunable hyperparameters. With each hyperparameter we would tune the model fitting would take more and more time so we started out with a baseline approach where we only tuned the number of decision trees and used the xgboost R package's default values for the other parameters. Tuning the depth of the trees also, further increased an already good performance. We tried to further improve performance by tuning all hyperparameters but after performing 10-fold cross validation on 25,000 models, a time consuming process, we could not further improve performance. It seems that the default values for learning rate, loss reduction, and minimum node weight hit a sweet spot.
+XGBoost allows for many tunable hyperparameters which's inclusion exponentially increases computing time for model fitting. Thus, we started out with a baseline approach. We only tuned the number of decision trees and used xgboost's R package default values for the other parameters. We then tuned the depth of the trees, further increasing an already good performance. Moreover, we tried to optimize performance by tuning all hyperparameters, but after performing 10-fold cross validation on 25,000 models, a time consuming process, we could not observe any additional improvements. It seems that the default values for learning rate, loss reduction, and minimum node weight hit a sweet spot.
 
 ```{r Gradient Boosting Training - 1}
 #| warnings: false
@@ -389,45 +384,40 @@ if(train_test == 0.8){
 ```
 
 ```{r Load XGBoost Model(s)}
+#| warnings: false
 #| echo: false
-
 # xg_trees = readRDS(paste0(folder, '/', "xg_trees.RDS"))
 xg_trees_depth = readRDS(paste0(folder, '/', "xg_trees_depth.RDS"))
 xg_trees_depth_n_rate_reduction = readRDS(paste0(folder, '/', "xg_trees_depth_n_rate_reduction.RDS"))
 ```
 
-Below we see the model performance on the test data.<br>
-Once for the model where we only tuned the number of trees and their respective depth (optimal):
+Below we see the model performance on the test data.<br> Once for the model where we only tuned the number of trees and their respective depth (optimal):
 
-```{r Print XGBoost Model 1}
-#| echo: true
+```{r Print XGBoost Model 1, echo = FALSE, results = 'asis'}
 
-collect_metrics(xg_trees_depth)
+kable(collect_metrics(xg_trees_depth))
 ```
 
 And for the model where we tuned all hyperparameters:
 
-```{r Print XGBoost Model 2}
-#| echo: true
+```{r Print XGBoost Model 2, echo = FALSE, results = 'asis'}
 
-collect_metrics(xg_trees_depth_n_rate_reduction)
+kable(collect_metrics(xg_trees_depth_n_rate_reduction))
 ```
 
-Of course, extensively tuning all parameters will eventually yield the best model. This takes a lot of resources though, and due to the fact that we already fitted a model on the default values we did not include them in the grid search for this model. We see that hyperparameter settings for loss reduction, learning rate, and minimum node weight below or above the default values does not increase model performance according to recall.<br> 
+Of course, extensively tuning all parameters will eventually yield the best model. This takes a lot of resources though, and due to the fact that we already fitted a model on the default values we did not include them in the grid search for this model. We see that hyperparameter settings for loss reduction, learning rate, and minimum node weight below or above the default values does not increase model performance according to recall.<br>
 
 The following shows the hyperparameter settings for the best performing XGBoost model:
 
-```{r Parameters of XGBoost}
-#| echo: true
+```{r Parameters of XGBoost, echo = FALSE, results = 'asis'}
 
 xg_trees_depth$.workflow
-metrics_xgboost <- collect_metrics(xg_trees_depth)
+kable(metrics_xgboost <- collect_metrics(xg_trees_depth))
 ```
 
 ## Lasso Regression
 
-```{r Lasso Regression}
-#| echo: false
+```{r Lasso Regression, echo = FALSE, results = 'asis'}
 
 # specify model
 lasso_spec <- logistic_reg(penalty = 0.01, mixture = 1) %>%
@@ -455,7 +445,7 @@ lasso_rs <- fit_resamples(
 lasso_rs_metrics <- collect_metrics(lasso_rs)
 lasso_rs_predictions <- collect_predictions(lasso_rs)
 
-lasso_rs_metrics
+kable(lasso_rs_metrics)
 # roc curve - pretty neat
 lasso_rs_predictions %>%
   group_by(id) %>%
@@ -463,7 +453,7 @@ lasso_rs_predictions %>%
   autoplot() 
 ```
 
-Through the penalty parameter in Lasso classification we can do feature selection. We initialized the lasso classifier with a penalty of 0.01 and fitted this initial model into a 10-fold cross-validation of the training data. Even with this initial model, the ROC-AUC plot shows that the performance is excellent (𝜇= 0.993). Recall, however, is slightly lower, and this is a very important metric in cancer detection, so we are going to try to improve it through hyperparameter tuning.
+Through the penalty parameter in lasso classification we can do feature selection. We initialized the lasso classifier with a penalty of 0.01 and fitted this initial model into a 10-fold cross-validation of the training data. Even with this initial model, the ROC-AUC plot shows that the performance is excellent (𝜇= 0.993). Recall, however, is slightly lower. Given that it is the most important metric in cancer detection, we tried to improve it through hyperparameter tuning.
 
 ```{r Tuning Lassos Penalty Parameter}
 #| echo: false
@@ -535,7 +525,7 @@ plot(roc_data, main = "ROC Curve", col = "blue", lwd = 2)
 
 ```
 
-Finally, we fit the Lasso with the tuned penalty to the train data, and evaluate the performance on the test data. The model performs really well, with a high capability of distinguishing classes (ROC AUC = 99.39%), and a high recall (96.68%) which means that the model is effective at capturing most positive cases, minimizing false negatives.
+Finally, we fit the lasso with the tuned penalty to the train data, and evaluate the performance on the test data. The model performs really well, with a high capability of distinguishing classes (ROC AUC = 99.39%), and a high recall (96.68%) which means that the model is effective at capturing most positive cases, minimizing false negatives.
 
 With a penalty parameter set at 0.0024, the majority of coefficients were effectively regularized to zero, resulting in the selection of 14 features considered most important for the classification.
 
@@ -545,7 +535,7 @@ On the other hand, higher values of smoothness, concavity and symmetry are assoc
 
 # Conclusion
 
-```{r}
+```{r, echo = FALSE, results = 'asis'}
 combined_metrics <- bind_rows(
   metrics_xgboost %>% mutate(model = "xgboost"),
   metrics_lasso %>% mutate(model = "lasso")
@@ -561,11 +551,10 @@ ggplot(combined_metrics, aes(x = .metric, y = .estimate, fill = model, label = r
 combined_metrics
 ```
 
-Strikingly, both models yield almost the exactly same performance, both being very effective in the binary classification. It's possible that both models converge to similar solutions during training and hyper parameter tuning. Overall, we managed to achieve a high level of recall with both models, which was our goal to minimize false negatives in cancer detection. 
 
-In addition to their performance metrics, it's important to consider the strengths and weaknesses of each model.  As above mentioned, both models perform feature selection (through different mechanism) which helps identify which are the most important variables. While Lasso's coefficients provide interpretability, XGBoost is more of a black box. This also means however that XGBoost is more flexible and has the power capture nonlinear relationships, while Lasso cannot. This, however, does not seem to be important for this application. Finally, as shown above, Lasso is more computational efficient than XGBoost.
+Strikingly, both models yield almost the exact same performance, both being very effective in the binary classification. It's possible that both models converge to similar solutions during training and hyperparameter tuning. Overall, we managed to achieve a high level of recall with both models, which was our goal to minimize false negatives in cancer detection.
 
-
+In addition to their performance metrics, it's important to consider the strengths and weaknesses of each model. As mentioned above , both models perform feature selection (albeit through different mechanism), which helps to identify which are the most important variables. While lasso's coefficients provide interpretability, XGBoost is more of a black box. This also means however that XGBoost is more flexible and has the power to capture nonlinear relationships, while lasso cannot. This, however, does not seem to be important for this application. Finally, as shown above, Lasso is more computational efficient than XGBoost.
 
 ```{r SVM}
 #| echo: false
