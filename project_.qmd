@@ -25,6 +25,8 @@ library(psych)
 library(glmnet)
 library(pROC)
 library(knitr)
+library(ggplot2)
+
 
 seed = 3 # because we're three pros working on this project!
 target_metric = 'recall' # measure of model performance
@@ -411,7 +413,7 @@ And for the model where we tuned all hyperparameters:
 collect_metrics(xg_trees_depth_n_rate_reduction)
 ```
 
-Of course, extensively tuning all parameters will eventually yield the best model. This takes a lot of ressources, though, and due to the fact that we already fitted a model on the default values we did not include them in the grid search for this model. We see that hyperparameter settings for loss reduction, learning rate, and minimum node weight below or above the default values does not increase model performance according to recall.<br> 
+Of course, extensively tuning all parameters will eventually yield the best model. This takes a lot of resources though, and due to the fact that we already fitted a model on the default values we did not include them in the grid search for this model. We see that hyperparameter settings for loss reduction, learning rate, and minimum node weight below or above the default values does not increase model performance according to recall.<br> 
 
 The following shows the hyperparameter settings for the best performing XGBoost model:
 
@@ -419,6 +421,7 @@ The following shows the hyperparameter settings for the best performing XGBoost 
 #| echo: true
 
 xg_trees_depth$.workflow
+metrics_xgboost <- collect_metrics(xg_trees_depth)
 ```
 
 ## Lasso Regression
@@ -521,12 +524,15 @@ lasso_final <- last_fit(final_lasso, split = training_split, metrics = metrics)
 collect_metrics(lasso_final, summarize = TRUE)
 collect_predictions(lasso_final)
 
+metrics_lasso<- collect_metrics(lasso_final, summarize = TRUE)
+
 # Plot ROC curve
 predictions <- lasso_final %>%
   collect_predictions()
 
 roc_data <- roc(predictions$diagnosis, predictions$.pred_M)
 plot(roc_data, main = "ROC Curve", col = "blue", lwd = 2)
+
 ```
 
 Finally, we fit the Lasso with the tuned penalty to the train data, and evaluate the performance on the test data. The model performs really well, with a high capability of distinguishing classes (ROC AUC = 99.39%), and a high recall (96.68%) which means that the model is effective at capturing most positive cases, minimizing false negatives.
@@ -539,7 +545,27 @@ On the other hand, higher values of smoothness, concavity and symmetry are assoc
 
 # Conclusion
 
-So... blablabla
+```{r}
+combined_metrics <- bind_rows(
+  metrics_xgboost %>% mutate(model = "xgboost"),
+  metrics_lasso %>% mutate(model = "lasso")
+)
+
+ggplot(combined_metrics, aes(x = .metric, y = .estimate, fill = model, label = round(.estimate, 3))) +
+  geom_bar(stat = "identity", position = position_dodge(), width = 0.7) +
+  geom_text(position = position_dodge(width = 0.9), vjust = -0.5, size = 3) +
+  labs(x = "Metric", y = "Estimate") +
+  theme_minimal()
+
+
+combined_metrics
+```
+
+Strikingly, both models yield almost the exactly same performance, both being very effective in the binary classification. It's possible that both models converge to similar solutions during training and hyper parameter tuning. Overall, we managed to achieve a high level of recall with both models, which was our goal to minimize false negatives in cancer detection. 
+
+In addition to their performance metrics, it's important to consider the strengths and weaknesses of each model.  As above mentioned, both models perform feature selection (through different mechanism) which helps identify which are the most important variables. While Lasso's coefficients provide interpretability, XGBoost is more of a black box. This also means however that XGBoost is more flexible and has the power capture nonlinear relationships, while Lasso cannot. This, however, does not seem to be important for this application. Finally, as shown above, Lasso is more computational efficient than XGBoost.
+
+
 
 ```{r SVM}
 #| echo: false
