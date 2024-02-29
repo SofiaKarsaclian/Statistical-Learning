@@ -494,7 +494,7 @@ chosen_l1 <- tune_rs %>%
 print(chosen_l1)
 ```
 
-We tune the model's $l_1$ penalty by creating a grid of 100 sensible values to try with `grid_regular`. We learn that the value of $l_1$ that yields the best recall (𝜇= 0.96) is 0.0024, and that this value also yields high roc_auc.
+We tune the model's $l_1$ penalty by creating a grid of 100 sensible values to try with `grid_regular()`. We learn that the value of $l_1$ that yields the best recall (𝜇= 0.96) is 0.0024, and that this value also yields high roc_auc.
 
 ```{r Lasso Performance}
 #| echo: false
