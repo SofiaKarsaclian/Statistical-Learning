@@ -433,7 +433,11 @@ bst = xgb.train(data = dtrain, max.depth = 1, eta = 0.6683439, nthread = 2,
                 objective = "binary:logistic")
 ```
 
+Below we see a list of all the features that contribute to the XGBoost model's performance sorted from highest to lowest (gain). We see that radius_worst and concave.points_mean have the highest influence on the models classification performance. Other features contribute as well but are not nearly as important as these two.
+
 ```{r Print XGBoost Features}
+#| echo: false
+
 xgb.importance(model = bst)
 ```
 
