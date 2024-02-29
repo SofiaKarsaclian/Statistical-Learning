@@ -1,18 +1,15 @@
 ---
-title: "Stat Learning Project"
-author: "Sofía Karsaclian, Elias Heppner, Andri Rutschmann"
+title: "Statistical Learning: Final Project"
+author: 
+  - "Sofía Karsaclian (01/1246546)"
+  - "Elias Heppner (01/1244414)"
+  - "Andri Rutschmann (01/1246603)"
 format:
   html:
     embed-resources: true
     df-print: kable
 editor: visual
 ---
-
-## Statistical Learning: Final Project
-
--   Sofía Karsaclian (01/1246546)
--   Elias Heppner (01/1244414)
--   Andri Rutschmann (01/1246603)
 
 ```{r Setup, echo = FALSE, warning = FALSE, output = FALSE}
 #| message: false
@@ -439,7 +436,7 @@ xgb.importance(model = bst)
 
 ## Lasso Regression
 
-We initialized a baseline lasso classifier with a penalty of 0.01 and fitted this initial model into a 10-fold cross-validation of the training data. Even with this initial model, the ROC-AUC plot blow shows that the performance is excellent (𝜇= 0.9982143). Recall, however, is not as good. Given that it is the most important metric in cancer detection, we tried to improve it through hyperparameter tuning.
+We initialized a baseline lasso classifier with a penalty of 0.01 and fitted this initial model into a 10-fold cross-validation of the training data. Even with this initial model, the ROC-AUC plot blow shows that the performance is excellent (𝜇= 0.998). Recall, however, is not as good. Given that it is the most important metric in cancer detection, we tried to improve it through hyperparameter tuning.
 
 ```{r Lasso Regression, echo = FALSE, results = 'asis'}
 
@@ -477,7 +474,7 @@ lasso_rs_predictions %>%
   autoplot() 
 ```
 
-We tune the model's $l_1$ penalty by creating a grid of 100 sensible values to try with `grid_regular()`.
+We tune the model's $l_1$ penalty by creating a grid of 100 sensible values to try with `grid_regular()`. We learn that the value of $l_1$ that yields the best recall (𝜇 = 0.993) is 0.00059, and that this value also yields high ROC-AUC.
 
 ```{r Tuning Lassos Penalty Parameter}
 #| echo: false
@@ -518,9 +515,9 @@ chosen_l1 <- tune_rs %>%
 print(chosen_l1)
 ```
 
-We learn that the value of $l_1$ that yields the best recall (𝜇 = 0.9928571) is 0.0005857021, and that this value also yields high ROC-AUC.
+Finally, we fit the lasso with the tuned penalty to the train data, and evaluate the performance on the test data. The model performs really well, with a high capability of distinguishing classes (ROC-AUC = 0.98), and a high recall (0.95) which means that the model is effective at capturing most positive cases, minimizing false negatives.
 
-Finally, we fit the lasso with the tuned penalty to the train data, and evaluate the performance on the test data. The model performs really well, with a high capability of distinguishing classes (ROC-AUC = 0.9812423), and a high recall (0.9529412) which means that the model is effective at capturing most positive cases, minimizing false negatives.
+With the penalty parameter set at 0.00059, the majority of coefficients were effectively regularized to zero, resulting in the selection of 13 features considered most important for the classification.<br> Among these, the variables that contributes the most to classify the breast mass as malignant are all those related to fractal dimension. The larger (mean and worst) and the more variations (SE) there are in fractal dimension, the more likely for it to be classified as malignant.<br> On the other hand, higher values of smoothness (and variation in the smoothness), symmetry and concavity are associated with a more likely benign classification. These features seem to be characteristics observed in non-cancerous masses.
 
 ```{r Lasso Performance}
 #| echo: false
@@ -550,8 +547,6 @@ roc_data <- roc(predictions$diagnosis, predictions$.pred_M)
 plot(roc_data, main = "ROC Curve", col = "blue", lwd = 2)
 
 ```
-
-With a penalty parameter set at 0.0005857021, the majority of coefficients were effectively regularized to zero, resulting in the selection of 13 features considered most important for the classification.<br> REWORK Among these, the variable that contributes the most to classify the breast mass as malignanat is the compactness SE: the more changes or variations in the mass' compactness, the more likely for it to be classified as malignant. To a lesser extent, mean fractal dimension also contributes to a malignant classification.<br> On the other hand, higher values of smoothness, concavity and symmetry are associated with a more likely benign classification. These features seem to be characteristics observed in non-cancerous masses.
 
 # Conclusion
 
