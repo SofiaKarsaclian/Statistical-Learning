@@ -527,14 +527,16 @@ autoplot(tune_rs)
 
 *Table 6*
 
-```{r Tuning Lassos Penalty Parameter - Table 6}
+```{r Tuning Lassos Penalty Parameter - Tab 6}
 #| echo: false
 tune_rs %>% # show the best models and their respective penalties
   show_best(target_metric) 
 
 ```
+
 *Table 7*
-```{r Tuning Lassos Penalty Parameter - Table 7}
+
+```{r Tuning Lassos Penalty Parameter - Tab 7}
 #| echo: false
 
 chosen_l1 <- tune_rs %>%

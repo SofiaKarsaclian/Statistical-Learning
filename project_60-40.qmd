@@ -98,6 +98,8 @@ We investigated the data by inspecting summary statistics and plotting histogram
 
 All features are numeric and in essence normally distributed, though many are heavily right-skewed. This is reasonable for the standard error and worst value features as they consist of values close to 0 and thus cannot be left-skewed. It is unclear why many of the mean features are right skewed.
 
+*Figure 1*
+
 ```{r Exploration_In1, echo = FALSE, results = 'asis'}
 
 # Create the bar plot
@@ -213,16 +215,19 @@ We investigated both the correlation of all features with the target variable as
 kable(corr_df[corr_df$correlation < 0.5,], row.names = FALSE)
 ```
 
-Inspecting the correlation between the features and the target variable revealed low correlation values for the features presented in Table 1. A simple logistic regression further revealed a statistically insignificant relation between the target variable and the features shown in Table 2.
+Inspecting the correlation between the features and the target variable revealed low correlation values (smaller than 0.5) for the features presented in Table 1. A simple logistic regression further revealed a statistically insignificant relation between the target variable and the features shown in Table 2.
 
 *Table 2*
 
 ```{r Feature Selection In2 - Feature Target Correlation,  echo = FALSE, results = 'asis'}
 
 kable(logreg_df[logreg_df$significant == "No",], row.names = FALSE)
+
 ```
 
 A correlation plot of the feature variables reveals high correlations between some of them. Dropping features with a correlation greater than 0.9. would lead to a reduction by 10 features, greatly reducing the dimensionality of the data.
+
+*Figure 2*
 
 ```{r Feature Selection In - Feature Correlation, echo = FALSE, results = 'asis'}
 # Feature selection? Not really needed
@@ -230,6 +235,7 @@ A correlation plot of the feature variables reveals high correlations between so
 df_corr <- cor(data %>% select(-diagnosis))
 corrplot::corrplot(df_corr, order = "hclust", tl.cex = 0.8, addrect = 8)
 detach("package:caret", unload = TRUE)
+
 ```
 
 Nevertheless, we decided not to omit any features. Given the models we use, neither a high correlation across features nor an insignificant relation to the target variable merit exclusion.
@@ -372,6 +378,7 @@ show_best(xg_rs_trees_depth, metric = target_metric)
 show_best(xg_rs_trees_depth_n_rate_reduction, metric = target_metric)
 ```
 
+
 ```{r Choose Best XGBoost and Final Fit}
 #| echo: false
 #| include: false
@@ -393,14 +400,18 @@ xg_final = last_fit(
 
 # Final performance on test data
 best_model
-collect_metrics(xg_final)
 ```
 
+
 Selecting the hyperparameter settings that maximized recall averaged across all folds we fit the model to the test data and received the model's test performance:<br>
+
+*Table 3*
 
 | trees | tree_depth | min_n | learning_rate | loss_reduction |
 |-------|------------|-------|---------------|----------------|
 | 30    | 1          | 2     | 0.6683439     | 0.3548134      |
+
+*Table 4*
 
 ```{r Print XGBoost Model, echo = FALSE, results = 'asis'}
 kable(collect_metrics(xg_final))
@@ -430,17 +441,21 @@ bst = xgb.train(data = dtrain, max.depth = 1, eta = 0.6683439, nthread = 2,
                 objective = "binary:logistic")
 ```
 
-Below we see a list of all the features that contribute to the XGBoost model's performance sorted from highest to lowest (gain). We see that radius_worst and concave.points_mean have the highest influence on the models classification performance. Other features contribute as well but are not nearly as important as these two.
+Below we see a list of all the features that contribute to the XGBoost model's performance sorted from highest to lowest (gain). We see that radius_worst and concave.points_mean have the highest influence on the models classification performance. Other features contribute as well but are not nearly as important as these two. None of the features is among those being insignificantly related to the target variable diagnosis.
+
+*Table 5*
 
 ```{r Print XGBoost Features}
 #| echo: false
 
-xgb.importance(model = bst)
+kable(xgb.importance(model = bst))
 ```
 
 ## Lasso Regression
 
 We initialized a baseline lasso classifier with a penalty of 0.01 and fitted this initial model into a 10-fold cross-validation of the training data. Even with this initial model, the ROC-AUC plot blow shows that the performance is excellent (𝜇= 0.998). Recall, however, is not as good. Given that it is the most important metric in cancer detection, we tried to improve it through hyperparameter tuning.
+
+*Table 6*
 
 ```{r Lasso Regression, echo = FALSE, results = 'asis'}
 
@@ -471,16 +486,25 @@ lasso_rs_metrics <- collect_metrics(lasso_rs)
 lasso_rs_predictions <- collect_predictions(lasso_rs)
 
 kable(lasso_rs_metrics)
+
+```
+*Figure 3*
+
+```{r Lasso Regression Fig, echo = FALSE, results = 'asis'}
+
 # roc curve - pretty neat
 lasso_rs_predictions %>%
   group_by(id) %>%
   roc_curve(truth = diagnosis, .pred_M) %>%
   autoplot() 
+
 ```
 
 We tune the model's $l_1$ penalty by creating a grid of 100 sensible values to try with `grid_regular()`. We learn that the value of $l_1$ that yields the best recall (𝜇 = 0.993) is 0.00059, and that this value also yields high ROC-AUC.
 
-```{r Tuning Lassos Penalty Parameter}
+*Figure 4*
+
+```{r Tuning Lassos Penalty Parameter - Fig}
 #| echo: false
 
 # Tuning for choosing best penalty - although pretty good already
@@ -509,21 +533,36 @@ tune_rs <- tune_grid(
 )
 
 autoplot(tune_rs) 
+```
+*Table 7*
+
+```{r Tuning Lassos Penalty Parameter - Tab 5}
+#| echo: false
 
 tune_rs %>% # show the best models and their respective penalties
   show_best(target_metric) 
 
+```
+
+*Table 8*
+
+```{r Tuning Lassos Penalty Parameter - Tab 6}
+#| echo: false
+
 chosen_l1 <- tune_rs %>%
   select_best(metric = target_metric)
+kable(chosen_l1)
 
-print(chosen_l1)
 ```
 
 Finally, we fit the lasso with the tuned penalty to the train data, and evaluate the performance on the test data. The model performs really well, with a high capability of distinguishing classes (ROC-AUC = 0.98), and a high recall (0.95) which means that the model is effective at capturing most positive cases, minimizing false negatives.
 
-With the penalty parameter set at 0.00059, the majority of coefficients were effectively regularized to zero, resulting in the selection of 13 features considered most important for the classification.<br> Among these, the variables that contributes the most to classify the breast mass as malignant are all those related to fractal dimension. The larger (mean and worst) and the more variations (SE) there are in fractal dimension, the more likely for it to be classified as malignant.<br> On the other hand, higher values of smoothness (and variation in the smoothness), symmetry and concavity are associated with a more likely benign classification. These features seem to be characteristics observed in non-cancerous masses.
+With the penalty parameter set at 0.00059, the majority of coefficients were effectively regularized to zero, resulting in the selection of 13 features considered most important for the classification.<br> Among these, the variables that contributes the most to classify the breast mass as malignant are all those related to fractal dimension. The larger (mean and worst) and the more variations (SE) there are in fractal dimension, the more likely for it to be classified as malignant.<br> On the other hand, higher values of smoothness (and variation in the smoothness), symmetry and concavity are associated with a more likely benign classification. These features seem to be characteristics observed in non-cancerous masses. Notably, smoothness (SE) and texture (SE), as well as fractal dimension (SE and mean) are among the features initially found to be insignificantly related to the target variable in a simple logistic regression.
 
-```{r Lasso Performance}
+
+*Table 9*
+
+```{r Lasso Performance - Tab 8}
 #| echo: false
 
 final_lasso <- finalize_workflow(tune_wf, chosen_l1)
@@ -536,12 +575,29 @@ fitted_lasso %>%
   filter(estimate != 0) %>%
   arrange(estimate)
 
+
+```
+
+
+*Table 10*
+
+```{r Lasso Performance - Tab 9}
+#| echo: false
+
 # Evaluate on test data 
 lasso_final <- last_fit(final_lasso, split = training_split, metrics = metrics)
 collect_metrics(lasso_final, summarize = TRUE)
 # collect_predictions(lasso_final)
 
 metrics_lasso<- collect_metrics(lasso_final, summarize = TRUE)
+
+
+```
+
+*Figure 5*
+
+```{r Lasso Performance - Fig}
+#| echo: false
 
 # Plot ROC curve
 predictions <- lasso_final %>%
@@ -552,11 +608,15 @@ plot(roc_data, main = "ROC Curve", col = "blue", lwd = 2)
 
 ```
 
+
+
 # Conclusion
 
 Strikingly, both models yield almost the exact same performance, both being very effective in the binary classification task. It's possible that both models converge to similar solutions during training and hyperparameter tuning. Overall, we managed to achieve a high level of recall with both models, minimizing false negatives, which was our goal.
 
-```{r, echo = FALSE, results = 'asis'}
+*Figure 6*
+
+```{r Conc Fig, echo = FALSE, results = 'asis'}
 combined_metrics <- bind_rows(
   metrics_xgboost %>% mutate(model = "xgboost"),
   metrics_lasso %>% mutate(model = "lasso")
@@ -569,7 +629,13 @@ ggplot(combined_metrics, aes(x = .metric, y = .estimate, fill = model, label = r
   theme_minimal()
 
 
+```
+*Table 11*
+
+```{r Conc Tab, echo = FALSE, results = 'asis'}
+
 combined_metrics
+
 ```
 
 In addition to their performance metrics, it's important to consider the strengths and weaknesses of each model. As mentioned above, both models perform feature selection (albeit through different mechanism), which helps to identify which are the most important variables. While lasso's coefficients provide interpretability, XGBoost is more of a black box. This also means however that XGBoost is more flexible and has the power to capture nonlinear relationships, while lasso cannot. This, however, does not seem to be important for this application. Finally, at least in this case, Lasso is computationally less expensive than XGBoost.<br> Because of this and its slightly better performance we would choose the lasso regression model as final classification model.
