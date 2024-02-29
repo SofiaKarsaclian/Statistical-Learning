@@ -102,6 +102,8 @@ We investigated the data by inspecting summary statistics and plotting histogram
 
 All features are numeric and in essence normally distributed, though many are heavily right-skewed. This is reasonable for the standard error and worst value features as they consist of values close to 0 and thus cannot be left-skewed. It is unclear why many of the mean features are right skewed.
 
+*Figure 1*
+
 ```{r Exploration_In1, echo = FALSE, results = 'asis'}
 
 # Create the bar plot
@@ -241,6 +243,8 @@ kable(logreg_df[logreg_df$significant == "No",], row.names = FALSE)
 
 A correlation plot of the feature variables reveals high correlations between some of them. Dropping features with a correlation greater than 0.9. would lead to a reduction by 10 features, greatly reducing the dimensionality of the data.
 
+*Figure 2*
+
 ```{r Feature Selection In - Feature Correlation, echo = FALSE, results = 'asis'}
 # Feature selection? Not really needed
 
@@ -279,7 +283,7 @@ We regarded it as most important to avoid false negatives when dealing with canc
 
 ## eXtreme Gradient Boosting (XGBoost)
 
-XGBoost allows for many tunable hyperparameters. The more of these we tune, the more we increases computing time for model fitting. Thus, we started out with a baseline approach. We only tuned the number of decision trees and used the xgboost R package's default values for the other parameters. We then also tuned the depth of the trees, further increasing an already good performance. Moreover, we tried to optimize performance by tuning all hyperparameters, but after performing 10-fold cross validation on 25,000 models - a time consuming process - we could not observe any additional improvements. It seems that the default values for learning rate, loss reduction, and minimum node weight hit a sweet spot.
+XGBoost allows for many tunable hyperparameters. The more of these we tune, the more we increase computing time for model fitting. Thus, we started out with a baseline approach. We only tuned the number of decision trees and used the xgboost R package's default values for the other parameters. We then also tuned the depth of the trees, further increasing an already good performance. Moreover, we tried to optimize performance by tuning all hyperparameters, but after performing 10-fold cross validation on 25,000 models - a time consuming process - we could not observe any additional improvements. It seems that the default values for learning rate, loss reduction, and minimum node weight hit a sweet spot.
 
 ```{r Gradient Boosting Training - 1}
 #| warnings: false
@@ -398,12 +402,16 @@ xg_trees_depth_n_rate_reduction = readRDS(paste0(folder, '/', "xg_trees_depth_n_
 Below we see the model performance on the test data.<br>
 Once for the model where we only tuned the number of trees and their respective depth (optimal):
 
+*Table 3*
+
 ```{r Print XGBoost Model 1, echo = FALSE, results = 'asis'}
 
 kable(collect_metrics(xg_trees_depth))
 ```
 
 And for the model where we tuned all hyperparameters:
+
+*Table 4*
 
 ```{r Print XGBoost Model 2, echo = FALSE, results = 'asis'}
 
@@ -414,6 +422,8 @@ metrics_xgboost <- collect_metrics(xg_trees_depth)
 Of course, extensively tuning all parameters will eventually yield the best model. This takes a lot of resources though, and due to the fact that we already fitted a model on the default values we did not include them in the grid search for this model. We see that hyperparameter settings for loss reduction, learning rate, and minimum node weight below or above the default values do not increase model performance according to recall.<br>
 
 The following hyperparameter settings yielded the best performing XGBoost model:<br>
+
+*Table 5*
 
 | trees | tree_depth | min_n | learning_rate | loss_reduction |
 |-------|------------|-------|---------------|----------------|
@@ -429,7 +439,9 @@ xg_trees_depth$.workflow
 
 We initialized a baseline lasso classifier with a penalty of 0.01 and fitted this initial model into a 10-fold cross-validation of the training data. Even with this initial model, the ROC-AUC plot blow shows that the performance is excellent (𝜇= 0.993). Recall, however, is slightly lower. Given that it is the most important metric in cancer detection, we tried to improve it through hyperparameter tuning.
 
-```{r Lasso Regression, echo = FALSE, results = 'asis'}
+*Table 6*
+
+```{r Lasso Regression Table, echo = FALSE, results = 'asis'}
 
 # specify model
 lasso_spec <- logistic_reg(penalty = 0.01, mixture = 1) %>%
@@ -458,6 +470,11 @@ lasso_rs_metrics <- collect_metrics(lasso_rs)
 lasso_rs_predictions <- collect_predictions(lasso_rs)
 
 kable(lasso_rs_metrics)
+```
+*Figure 3*
+
+```{r Lasso Regression Plot, echo = FALSE, results = 'asis'}
+
 # roc curve - pretty neat
 lasso_rs_predictions %>%
   group_by(id) %>%
@@ -465,9 +482,12 @@ lasso_rs_predictions %>%
   autoplot() 
 ```
 
+
 We tune the model's $l_1$ penalty by creating a grid of 100 sensible values to try with `grid_regular()`.
 
-```{r Tuning Lassos Penalty Parameter}
+*Figure 4*
+
+```{r Tuning Lassos Penalty Parameter - Plot}
 #| echo: false
 
 # Tuning for choosing best penalty - although pretty good already
@@ -497,36 +517,64 @@ tune_rs <- tune_grid(
 
 autoplot(tune_rs) 
 
+```
+
+*Table 6*
+
+```{r Tuning Lassos Penalty Parameter - Table 6}
+#| echo: false
 tune_rs %>% # show the best models and their respective penalties
   show_best(target_metric) 
+
+```
+*Table 7*
+```{r Tuning Lassos Penalty Parameter - Table 7}
+#| echo: false
 
 chosen_l1 <- tune_rs %>%
   select_best(metric = target_metric)
 
-print(chosen_l1)
+kable(chosen_l1)
+
 ```
 
 We learn that the value of $l_1$ that yields the best recall (𝜇= 0.96) is 0.0023645, and that this value also yields high roc_auc.
 
 Finally, we fit the lasso with the tuned penalty to the train data, and evaluate the performance on the test data. The model performs really well, with a high capability of distinguishing classes (ROC AUC = 99.39%), and a high recall (96.68%) which means that the model is effective at capturing most positive cases, minimizing false negatives.
 
-```{r Lasso Performance}
+*Table 8*
+
+```{r Lasso Performance - Table 8}
 #| echo: false
 
 final_lasso <- finalize_workflow(tune_wf, chosen_l1)
 
 fitted_lasso <- fit(final_lasso, train)
 
-fitted_lasso %>%
+kable(fitted_lasso %>%
   extract_fit_parsnip() %>%
   tidy() %>%
   filter(estimate != 0) %>%
-  arrange(estimate)
+  arrange(estimate))
+
+```
+*Table 9*
+
+```{r Lasso Performance - Table 9}
 
 # Evaluate on test data 
 lasso_final <- last_fit(final_lasso, split = training_split, metrics = metrics)
 collect_metrics(lasso_final, summarize = TRUE)
 # collect_predictions(lasso_final)
+
+
+```
+
+*Figure 5*
+
+```{r Lasso Performance - Figure 5}
+#| echo: false
+
 
 metrics_lasso<- collect_metrics(lasso_final, summarize = TRUE)
 
@@ -547,7 +595,10 @@ On the other hand, higher values of smoothness, concavity and symmetry are assoc
 
 Strikingly, both models yield almost the exact same performance, both being very effective in the binary classification task. It's possible that both models converge to similar solutions during training and hyperparameter tuning. Overall, we managed to achieve a high level of recall with both models, which was our goal to minimize false negatives in cancer detection.
 
+*Figure 6*
+
 ```{r, echo = FALSE, results = 'asis'}
+
 combined_metrics <- bind_rows(
   metrics_xgboost %>% mutate(model = "xgboost"),
   metrics_lasso %>% mutate(model = "lasso")
@@ -559,6 +610,11 @@ ggplot(combined_metrics, aes(x = .metric, y = .estimate, fill = model, label = r
   labs(x = "Metric", y = "Estimate") +
   theme_minimal()
 
+```
+
+*Table 10*
+
+```{r, echo = FALSE, results = 'asis'}
 
 combined_metrics
 ```
