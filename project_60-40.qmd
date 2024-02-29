@@ -207,18 +207,6 @@ logreg_df
 #-> That's also where the anova test yields insignificant results. Dropping these features likely will not decrease model performance.
 ```
 
-```{r Feature Selection - Feature Correlation, echo = FALSE, warning = FALSE, output = FALSE}
-
-# Feature selection? Not really needed
-dim(data)
-
-df_corr <- cor(data %>% select(-diagnosis))
-corrplot::corrplot(df_corr, order = "hclust", tl.cex = 0.8, addrect = 8)
-
-data2 <- data %>% select(-findCorrelation(df_corr, cutoff = 0.9))
-detach("package:caret", unload = TRUE)
-```
-
 We investigated both the correlation of all features with the target variable as well as pair-wise correlation between the features.
 
 *Table 1*
@@ -242,7 +230,9 @@ A correlation plot of the feature variables reveals high correlations between so
 ```{r Feature Selection In - Feature Correlation, echo = FALSE, results = 'asis'}
 # Feature selection? Not really needed
 
+df_corr <- cor(data %>% select(-diagnosis))
 corrplot::corrplot(df_corr, order = "hclust", tl.cex = 0.8, addrect = 8)
+detach("package:caret", unload = TRUE)
 ```
 
 Nevertheless, we decided not to omit any features. Given the models we use, neither a high correlation across features nor an insignificant relation to the target variable merit exclusion.

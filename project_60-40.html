@@ -20,6 +20,40 @@ ul.task-list li input[type="checkbox"] {
 width: 0.8em;
 margin: 0 0.8em 0.2em -1em;  vertical-align: middle;
 }
+
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+{ counter-reset: source-line 0; }
+pre.numberSource code > span
+{ position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+{ content: counter(source-line);
+position: relative; left: -1em; text-align: right; vertical-align: baseline;
+border: none; display: inline-block;
+-webkit-touch-callout: none; -webkit-user-select: none;
+-khtml-user-select: none; -moz-user-select: none;
+-ms-user-select: none; user-select: none;
+padding: 0 4px; width: 4em;
+}
+pre.numberSource { margin-left: 3em; padding-left: 4px; }
+div.sourceCode
+{ }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
 </style>
 
 
@@ -3230,6 +3264,91 @@ vertical-align: -.125em;
 </tr>
 </tbody>
 </table>
+</div>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">xgb.importance</span>(<span class="at">model =</span> bst)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<div class="kable-table">
+<table class="table table-sm table-striped small">
+<thead>
+<tr class="header">
+<th style="text-align: left;">Feature</th>
+<th style="text-align: right;">Gain</th>
+<th style="text-align: right;">Cover</th>
+<th style="text-align: right;">Frequency</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">radius_worst</td>
+<td style="text-align: right;">0.4802374</td>
+<td style="text-align: right;">0.1915425</td>
+<td style="text-align: right;">0.0666667</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">concave.points_mean</td>
+<td style="text-align: right;">0.2151952</td>
+<td style="text-align: right;">0.1456482</td>
+<td style="text-align: right;">0.0666667</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">concave.points_worst</td>
+<td style="text-align: right;">0.0942566</td>
+<td style="text-align: right;">0.1648846</td>
+<td style="text-align: right;">0.1333333</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">perimeter_worst</td>
+<td style="text-align: right;">0.0897065</td>
+<td style="text-align: right;">0.1099673</td>
+<td style="text-align: right;">0.0666667</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">texture_worst</td>
+<td style="text-align: right;">0.0499874</td>
+<td style="text-align: right;">0.1267298</td>
+<td style="text-align: right;">0.2000000</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">area_worst</td>
+<td style="text-align: right;">0.0318170</td>
+<td style="text-align: right;">0.1044766</td>
+<td style="text-align: right;">0.1666667</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">symmetry_worst</td>
+<td style="text-align: right;">0.0151892</td>
+<td style="text-align: right;">0.0562198</td>
+<td style="text-align: right;">0.1000000</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">texture_mean</td>
+<td style="text-align: right;">0.0133339</td>
+<td style="text-align: right;">0.0285194</td>
+<td style="text-align: right;">0.0333333</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">concavity_worst</td>
+<td style="text-align: right;">0.0060140</td>
+<td style="text-align: right;">0.0347094</td>
+<td style="text-align: right;">0.0666667</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">smoothness_worst</td>
+<td style="text-align: right;">0.0027758</td>
+<td style="text-align: right;">0.0246020</td>
+<td style="text-align: right;">0.0666667</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">area_se</td>
+<td style="text-align: right;">0.0014871</td>
+<td style="text-align: right;">0.0127003</td>
+<td style="text-align: right;">0.0333333</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
 </div>
 </section>
 <section id="lasso-regression" class="level2">
