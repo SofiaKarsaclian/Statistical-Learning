@@ -261,7 +261,7 @@ data$diagnosis = factor(data$diagnosis, levels = c('M', 'B'))
 #   select(-fractal_dimension_mean, -texture_se, -smoothness_se, -symmetry_se, -fractal_dimension_se)
 
 # Creating train/test splits
-train_test = 0.8 # define how much of the data is used as training/test data
+train_test = 0.6 # define how much of the data is used as training/test data (tried 0.6 as well)
 set.seed(seed)
 training_split = initial_split(data, prop = train_test, strata = diagnosis)
 
@@ -269,13 +269,9 @@ train = training(training_split)
 test = testing(training_split) # we don't really need this since we use last_fit()
 ```
 
-We are going to compare two different models for this project: eXtreme Gradient Boosting (XGBoost) and lasso regression. Hence, we do not need to perform normalization and feature selection ourselves.<br>
-XGBoost, being a decision tree based model, does not require normalization and due to our use of the glmnet library normalization is performed automatically when we fit our lasso regression.<br>
-Regarding feature selection we exploit the fact that XGBoost as well as lasso inherently perform feature selection. XGBoost does so due to the fact that the maximum tree depth is limited to a specific $n$ and the algorithm therefore only splits on the $n$ most informative splitting criteria. Lasso uses a penalty to restrict the number of features that influence the model thereby reducing dimensionality.<br>
-Hence, given the small size of the dataset, dropping features yields little in terms of computing speed and omits data that is nevertheless potentially useful for XGBoost and and not detrimental to lasso regression.<br>
+We are going to compare two different models for this project: eXtreme Gradient Boosting (XGBoost) and lasso regression. Hence, we do not need to perform normalization and feature selection ourselves.<br> XGBoost, being a decision tree based model, does not require normalization and due to our use of the glmnet library normalization is performed automatically when we fit our lasso regression.<br> Regarding feature selection we exploit the fact that XGBoost as well as lasso inherently perform feature selection. XGBoost does so due to the fact that the maximum tree depth is limited to a specific $n$ and the algorithm therefore only splits on the $n$ most informative splitting criteria. Lasso uses a penalty to restrict the number of features that influence the model thereby reducing dimensionality.<br> Hence, given the small size of the dataset, dropping features yields little in terms of computing speed and omits data that is nevertheless potentially useful for XGBoost and and not detrimental to lasso regression.<br>
 
-Following Emil Hvitfeldt's and Julia Silge's [Supervised Machine Learning for Text Analysis in R](https://smltar.com/), we fit both models using the tidymodels R package. After cross-validating different distributions we split our data into 80% training and 20% testing data. This resulted in the best model performances. To optimize hyperparameter settings we used 10-fold cross validation and the recall metric.<br>
-We regarded it as most important to avoid false negatives when dealing with cancer data, leading us to weigh a model's recall more heavily than its F1-score, precision, or roc-auc measure.
+Following Emil Hvitfeldt's and Julia Silge's [Supervised Machine Learning for Text Analysis in R](https://smltar.com/), we fit both models using the tidymodels R package. After cross-validating different distributions we split our data into 80% training and 20% testing data. This resulted in the best model performances. To optimize hyperparameter settings we used 10-fold cross validation and the recall metric.<br> We regarded it as most important to avoid false negatives when dealing with cancer data, leading us to weigh a model's recall more heavily than its F1-score, precision, or roc-auc measure.
 
 ## eXtreme Gradient Boosting (XGBoost)
 
@@ -284,6 +280,7 @@ XGBoost allows for many tunable hyperparameters. The more of these we tune, the 
 ```{r Gradient Boosting Training - 1}
 #| warnings: false
 #| echo: false
+#| eval: false
 
 # Create tuning recipe
 tune_rec = recipe(diagnosis ~ ., data = train)
@@ -292,7 +289,7 @@ tune_rec = recipe(diagnosis ~ ., data = train)
 set.seed(seed)
 folds = vfold_cv(train, v = 10)
 
-model_nr = 1
+model_nr = 3 # currently set to the 'best' model (if set to 3 chunk takes a long time to run)
 
 # XGBoost model specification
 if(model_nr == 1){ # model with less tuned parameters
@@ -365,6 +362,8 @@ xg_rs = tune_grid( # specify individual components with tune_grid
   metrics = metrics # specify metrics
 )
 
+show_best(xg_rs, metric = target_metric)
+
 # collect_metrics(xg_rs, summarize = TRUE) # get model metrics
 best_model = select_best(xg_rs, metric = target_metric) # select best model according to target metric
 
@@ -385,6 +384,14 @@ if(train_test == 0.8){
   folder = '60_40'
 }
 # saveRDS(xg_final, paste0(folder, '/', model_name, ".RDS")) # takes several mins to re-fit model
+
+collect_metrics(xg_final)
+
+saveRDS(xg_wf_final, 'test.RDS')
+
+xg_final = last_fit(
+  readRDS('test.RDS'), training_split, metrics = metrics
+  )
 ```
 
 ```{r Load XGBoost Model(s)}
@@ -395,8 +402,7 @@ xg_trees_depth = readRDS(paste0(folder, '/', "xg_trees_depth.RDS"))
 xg_trees_depth_n_rate_reduction = readRDS(paste0(folder, '/', "xg_trees_depth_n_rate_reduction.RDS"))
 ```
 
-Below we see the model performance on the test data.<br>
-Once for the model where we only tuned the number of trees and their respective depth (optimal):
+Below we see the model performance on the test data.<br> Once for the model where we only tuned the number of trees and their respective depth (optimal):
 
 ```{r Print XGBoost Model 1, echo = FALSE, results = 'asis'}
 
@@ -417,7 +423,7 @@ The following hyperparameter settings yielded the best performing XGBoost model:
 
 | trees | tree_depth | min_n | learning_rate | loss_reduction |
 |-------|------------|-------|---------------|----------------|
-|   36  |      1     |   1   |      0.3      |        0       |
+| 36    | 1          | 1     | 0.3           | 0              |
 
 ```{r Parameters of XGBoost, echo = FALSE, results = 'asis'}
 #| eval: false
@@ -539,9 +545,7 @@ plot(roc_data, main = "ROC Curve", col = "blue", lwd = 2)
 
 ```
 
-With a penalty parameter set at 0.0023645, the majority of coefficients were effectively regularized to zero, resulting in the selection of 14 features considered most important for the classification.<br>
-Among these, the variable that contributes the most to classify the breast mass as malignanat is the compactness SE: the more changes or variations in the mass' compactness, the more likely for it to be classified as malignant. To a lesser extent, mean fractal dimension also contributes to a malignant classification.<br>
-On the other hand, higher values of smoothness, concavity and symmetry are associated with a more likely benign classification. These features seem to be characteristics observed in non-cancerous masses.
+With a penalty parameter set at 0.0023645, the majority of coefficients were effectively regularized to zero, resulting in the selection of 14 features considered most important for the classification.<br> Among these, the variable that contributes the most to classify the breast mass as malignanat is the compactness SE: the more changes or variations in the mass' compactness, the more likely for it to be classified as malignant. To a lesser extent, mean fractal dimension also contributes to a malignant classification.<br> On the other hand, higher values of smoothness, concavity and symmetry are associated with a more likely benign classification. These features seem to be characteristics observed in non-cancerous masses.
 
 # Conclusion
 
@@ -563,8 +567,7 @@ ggplot(combined_metrics, aes(x = .metric, y = .estimate, fill = model, label = r
 combined_metrics
 ```
 
-In addition to their performance metrics, it's important to consider the strengths and weaknesses of each model. As mentioned above, both models perform feature selection (albeit through different mechanism), which helps to identify which are the most important variables. While lasso's coefficients provide interpretability, XGBoost is more of a black box. This also means however that XGBoost is more flexible and has the power to capture nonlinear relationships, while lasso cannot. This, however, does not seem to be important for this application. Finally, as shown above, Lasso is computationally less expensive than XGBoost.<br>
-Because of this and its incredible performance we would choose the lasso regression model as final classification model.
+In addition to their performance metrics, it's important to consider the strengths and weaknesses of each model. As mentioned above, both models perform feature selection (albeit through different mechanism), which helps to identify which are the most important variables. While lasso's coefficients provide interpretability, XGBoost is more of a black box. This also means however that XGBoost is more flexible and has the power to capture nonlinear relationships, while lasso cannot. This, however, does not seem to be important for this application. Finally, as shown above, Lasso is computationally less expensive than XGBoost.<br> Because of this and its incredible performance we would choose the lasso regression model as final classification model.
 
 ```{r SVM}
 #| echo: false
